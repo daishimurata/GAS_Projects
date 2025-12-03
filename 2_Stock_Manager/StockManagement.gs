@@ -140,15 +140,37 @@ function syncStockManagement() {
                     });
                   }
                   
+                  // 単価と売上金額を取得
+                  const unitPrice = parseInt(stockInfo.unitPrice, 10) || 0;
+                  const salesAmount = unitPrice > 0 ? soldCount * unitPrice : 0;
+                  
                   // ログシートに記録
-                  logSheet.appendRow([
-                    emailData.date,
-                    storeName,
-                    itemName,
-                    soldCount, // 売上数（正の値）
-                    newStock,
-                    isLowStock ? '⚠️要発注' : 'メール自動取込'
-                  ]);
+                  const logHeaders = logSheet.getRange(1, 1, 1, logSheet.getLastColumn()).getValues()[0];
+                  const hasUnitPrice = logHeaders.includes('単価');
+                  const hasSalesAmount = logHeaders.includes('売上金額');
+                  
+                  if (hasUnitPrice && hasSalesAmount) {
+                    logSheet.appendRow([
+                      emailData.date,
+                      storeName,
+                      itemName,
+                      soldCount,
+                      unitPrice,
+                      salesAmount,
+                      newStock,
+                      isLowStock ? '⚠️要発注' : 'メール自動取込'
+                    ]);
+                  } else {
+                    // 旧形式のログシートの場合
+                    logSheet.appendRow([
+                      emailData.date,
+                      storeName,
+                      itemName,
+                      soldCount, // 売上数（正の値）
+                      newStock,
+                      isLowStock ? '⚠️要発注' : 'メール自動取込'
+                    ]);
+                  }
                   
                   // 月次ログファイルにも記録
                   saveStockLogToFile(emailData.date, storeName, itemName, soldCount, newStock);
@@ -156,6 +178,8 @@ function syncStockManagement() {
                   salesData.push({
                     itemName: itemName,
                     soldCount: soldCount,
+                    unitPrice: unitPrice,
+                    salesAmount: salesAmount,
                     currentStock: currentStock,
                     newStock: newStock,
                     isLowStock: isLowStock,
@@ -192,6 +216,13 @@ function syncStockManagement() {
         stats.errors.push(`Thread ${threadIndex + 1}: ${error.message}`);
       }
     });
+    
+    // 日次売上サマリーを更新
+    if (notifications.length > 0) {
+      notifications.forEach(notification => {
+        updateDailySalesSummary(spreadsheet, notification.storeName, notification.date, notification.items);
+      });
+    }
     
     // LINE通知を送信
     if (notifications.length > 0) {
@@ -255,15 +286,31 @@ function loadStockMaster(stockSheet) {
       let warningLine = 0;
       let lastUpdate = '';
       
+      let unitPrice = 0;
+      let totalSales = 0;
+      let totalRevenue = 0;
+      
       if (hasAliasColumn) {
-        // 新レイアウト: A:店舗, B:商品, C:別名, D:在庫, E:発注点, F:更新
-        const keywordsStr = data[i][2]; // C列
+        // ヘッダーから列インデックスを動的に取得
+        const headers = data[0];
+        const stockIndex = headers.indexOf('現在庫');
+        const warningIndex = headers.indexOf('発注点');
+        const unitPriceIndex = headers.indexOf('単価');
+        const totalSalesIndex = headers.indexOf('累計販売数');
+        const totalRevenueIndex = headers.indexOf('累計売上金額');
+        const lastUpdateIndex = headers.indexOf('最終更新日時');
+        
+        const keywordsStr = data[i][2]; // C列: 別名キーワード
         if (keywordsStr) {
           keywords = keywordsStr.toString().split(/[,\s、]+/).map(k => k.trim()).filter(k => k);
         }
-        currentStock = data[i][3]; // D列
-        warningLine = data[i][4];  // E列
-        lastUpdate = data[i][5];   // F列
+        
+        currentStock = stockIndex >= 0 ? (data[i][stockIndex] || 0) : (data[i][3] || 0); // D列: 現在庫
+        warningLine = warningIndex >= 0 ? (data[i][warningIndex] || 0) : (data[i][4] || 0);  // E列: 発注点
+        unitPrice = unitPriceIndex >= 0 ? (parseInt(data[i][unitPriceIndex], 10) || 0) : 0;  // F列: 単価
+        totalSales = totalSalesIndex >= 0 ? (parseInt(data[i][totalSalesIndex], 10) || 0) : 0;  // G列: 累計販売数
+        totalRevenue = totalRevenueIndex >= 0 ? (parseInt(data[i][totalRevenueIndex], 10) || 0) : 0;  // H列: 累計売上金額
+        lastUpdate = lastUpdateIndex >= 0 ? data[i][lastUpdateIndex] : (data[i][8] || '');   // I列: 最終更新日時
       } else {
         // 旧レイアウト: A:店舗, B:商品, C:在庫, D:発注点, E:更新
         currentStock = data[i][2]; // C列
@@ -278,6 +325,9 @@ function loadStockMaster(stockSheet) {
         keywords: keywords,
         currentStock: currentStock,
         warningLine: warningLine,
+        unitPrice: unitPrice,
+        totalSales: totalSales,
+        totalRevenue: totalRevenue,
         lastUpdate: lastUpdate
       });
     }
@@ -384,9 +434,18 @@ function extractSoldCount(text, itemName) {
  */
 function saveStockLogToFile(date, storeName, itemName, soldCount, newStock) {
   try {
+    // 日付をDateオブジェクトに変換
+    const dateObj = date instanceof Date ? date : new Date(date);
+    
+    // 無効な日付の場合は現在日時を使用
+    if (isNaN(dateObj.getTime())) {
+      logWarning(`無効な日付が渡されました: ${date}。現在日時を使用します。`);
+      dateObj = new Date();
+    }
+    
     let folder;
     if (CONFIG.GOOGLE_DRIVE.MONTHLY_ORGANIZATION) {
-      const monthFolder = getMonthFolderName(date);
+      const monthFolder = getMonthFolderName(dateObj);
       folder = getOrCreateFolder(
         CONFIG.GOOGLE_DRIVE.ROOT_FOLDER_NAME + '/在庫管理ログ/' + monthFolder
       );
@@ -394,8 +453,8 @@ function saveStockLogToFile(date, storeName, itemName, soldCount, newStock) {
       folder = getOrCreateFolder(CONFIG.GOOGLE_DRIVE.ROOT_FOLDER_NAME + '/在庫管理ログ');
     }
     
-    const fileName = `${Utilities.formatDate(date, 'Asia/Tokyo', 'yyyy-MM-dd')}_在庫管理.txt`;
-    const logText = `[${formatDateTime(date)}] ${storeName} - ${itemName}: ${soldCount}個売却 → 在庫${newStock}個\n`;
+    const fileName = `${Utilities.formatDate(dateObj, 'Asia/Tokyo', 'yyyy-MM-dd')}_在庫管理.txt`;
+    const logText = `[${formatDateTime(dateObj)}] ${storeName} - ${itemName}: ${soldCount}個売却 → 在庫${newStock}個\n`;
     
     const files = folder.getFilesByName(fileName);
     if (files.hasNext()) {
@@ -418,7 +477,9 @@ function sendStockUpdateNotification(notifications, stats) {
     
     notifications.forEach(notification => {
       message += `【${notification.storeName}】\n`;
-      message += `時刻: ${Utilities.formatDate(notification.date, 'Asia/Tokyo', 'HH:mm')}\n\n`;
+      // 日付が文字列の場合はDateオブジェクトに変換
+      const dateObj = notification.date instanceof Date ? notification.date : new Date(notification.date);
+      message += `時刻: ${Utilities.formatDate(dateObj, 'Asia/Tokyo', 'HH:mm')}\n\n`;
       
       notification.items.forEach(item => {
         message += `• ${item.itemName}: ${item.soldCount}個売却\n`;
@@ -457,7 +518,12 @@ function sendLowStockWarning(lowStockItems) {
     });
     
     message += '発注をご検討ください。';
-    sendWarningNotification('在庫不足', message);
+    // sendWarningNotificationが未定義の場合はsendInfoNotificationを使用
+    if (typeof sendWarningNotification === 'function') {
+      sendWarningNotification('在庫不足', message);
+    } else {
+      sendInfoNotification('在庫不足警告', message);
+    }
   } catch (error) {
     logError('在庫不足警告エラー', error);
   }
@@ -575,30 +641,85 @@ function initializeStockManagementSheets(spreadsheet) {
   let stockSheet = spreadsheet.getSheetByName('在庫管理');
   if (!stockSheet) {
     stockSheet = spreadsheet.insertSheet('在庫管理', 0);
-    // ヘッダー変更: 店舗名, 商品名, 別名キーワード, 現在庫, 発注点, 最終更新日時
-    const stockHeaders = ['店舗名', '商品名', '別名キーワード', '現在庫', '発注点', '最終更新日時'];
+    // ヘッダー: 店舗名, 商品名, 別名キーワード, 現在庫, 発注点, 単価, 累計販売数, 累計売上金額, 最終更新日時
+    const stockHeaders = ['店舗名', '商品名', '別名キーワード', '現在庫', '発注点', '単価', '累計販売数', '累計売上金額', '最終更新日時'];
     stockSheet.getRange(1, 1, 1, stockHeaders.length).setValues([stockHeaders]);
     stockSheet.getRange(1, 1, 1, stockHeaders.length).setFontWeight('bold');
     stockSheet.setFrozenRows(1);
     stockSheet.setColumnWidth(3, 200); // キーワード列を広めに
+  } else {
+    // 既存シートに列が不足している場合は追加
+    const headers = stockSheet.getRange(1, 1, 1, stockSheet.getLastColumn()).getValues()[0];
+    const requiredHeaders = ['店舗名', '商品名', '別名キーワード', '現在庫', '発注点', '単価', '累計販売数', '累計売上金額', '最終更新日時'];
+    let lastCol = stockSheet.getLastColumn();
     
-    // サンプルデータ
-    const sampleData = [
-      ['みどりの大地', 'じゃがいも', 'ジャガイモ, ポテト', 50, 10, ''],
-      ['みどりの大地', '白ねぎ', '白ネギ, ネギ, ねぎ', 30, 5, ''],
-      ['四季菜 尾平', 'トマト', 'ミニトマト', 20, 5, '']
-    ];
-    stockSheet.getRange(2, 1, sampleData.length, 6).setValues(sampleData);
+    // 不足している列を追加
+    if (!headers.includes('単価')) {
+      stockSheet.insertColumnAfter(lastCol);
+      stockSheet.getRange(1, lastCol + 1).setValue('単価');
+      stockSheet.getRange(1, lastCol + 1).setFontWeight('bold');
+      lastCol++;
+    }
+    if (!headers.includes('累計販売数')) {
+      stockSheet.insertColumnAfter(lastCol);
+      stockSheet.getRange(1, lastCol + 1).setValue('累計販売数');
+      stockSheet.getRange(1, lastCol + 1).setFontWeight('bold');
+      lastCol++;
+    }
+    if (!headers.includes('累計売上金額')) {
+      stockSheet.insertColumnAfter(lastCol);
+      stockSheet.getRange(1, lastCol + 1).setValue('累計売上金額');
+      stockSheet.getRange(1, lastCol + 1).setFontWeight('bold');
+      lastCol++;
+    }
+    // 最終更新日時の列名を確認・更新
+    const lastUpdateIndex = headers.indexOf('最終更新日時');
+    if (lastUpdateIndex === -1 && headers.indexOf('更新') !== -1) {
+      stockSheet.getRange(1, headers.indexOf('更新') + 1).setValue('最終更新日時');
+    }
   }
   
   // 売上履歴シート作成
   let logSheet = spreadsheet.getSheetByName('売上履歴');
   if (!logSheet) {
     logSheet = spreadsheet.insertSheet('売上履歴');
-    const logHeaders = ['日時', '店舗', '商品', '販売数', '残在庫', '備考'];
+    const logHeaders = ['日時', '店舗', '商品', '販売数', '単価', '売上金額', '残在庫', '備考'];
     logSheet.getRange(1, 1, 1, logHeaders.length).setValues([logHeaders]);
     logSheet.getRange(1, 1, 1, logHeaders.length).setFontWeight('bold');
     logSheet.setFrozenRows(1);
+  } else {
+    // 既存シートに列が不足している場合は追加
+    const headers = logSheet.getRange(1, 1, 1, logSheet.getLastColumn()).getValues()[0];
+    let lastCol = logSheet.getLastColumn();
+    
+    if (!headers.includes('単価')) {
+      const salesCountIndex = headers.indexOf('販売数');
+      if (salesCountIndex !== -1) {
+        logSheet.insertColumnAfter(salesCountIndex + 1);
+        logSheet.getRange(1, salesCountIndex + 2).setValue('単価');
+        logSheet.getRange(1, salesCountIndex + 2).setFontWeight('bold');
+        lastCol++;
+      }
+    }
+    if (!headers.includes('売上金額')) {
+      const unitPriceIndex = headers.indexOf('単価');
+      if (unitPriceIndex !== -1) {
+        logSheet.insertColumnAfter(unitPriceIndex + 1);
+        logSheet.getRange(1, unitPriceIndex + 2).setValue('売上金額');
+        logSheet.getRange(1, unitPriceIndex + 2).setFontWeight('bold');
+        lastCol++;
+      }
+    }
+  }
+  
+  // 日次売上サマリーシート作成
+  let dailySalesSheet = spreadsheet.getSheetByName('日次売上サマリー');
+  if (!dailySalesSheet) {
+    dailySalesSheet = spreadsheet.insertSheet('日次売上サマリー');
+    const dailyHeaders = ['日付', '店舗', '商品数', '総販売数', '総売上金額'];
+    dailySalesSheet.getRange(1, 1, 1, dailyHeaders.length).setValues([dailyHeaders]);
+    dailySalesSheet.getRange(1, 1, 1, dailyHeaders.length).setFontWeight('bold');
+    dailySalesSheet.setFrozenRows(1);
   }
   
   // 店舗設定シート作成
