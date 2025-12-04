@@ -51,6 +51,13 @@ function getAuditMessages(fromDate, toDate, targetUserId = null) {
     
     if (responseCode !== 200) {
       const errorBody = response.getContentText();
+      
+      // 404エラーは想定内（APIが利用できない場合）
+      if (responseCode === 404) {
+        logWarning(`Audit API利用不可 (404): APIが存在しないか、権限がありません。Webhook経由でメッセージを取得してください。`);
+        return []; // 空の配列を返して処理を続行
+      }
+      
       logError(`Audit API Error (${responseCode})`, new Error(errorBody));
       throw new Error(`Audit API Error (${responseCode}): ${errorBody}`);
     }
@@ -58,6 +65,12 @@ function getAuditMessages(fromDate, toDate, targetUserId = null) {
     const data = JSON.parse(response.getContentText());
     return data.logs || [];
   } catch (error) {
+    // 404エラーの場合は警告のみで処理を続行
+    if (error.message && error.message.includes('404')) {
+      logWarning(`Audit API利用不可: ${error.message}。Webhook経由でメッセージを取得してください。`);
+      return [];
+    }
+    
     logError('監査ログ取得エラー', error);
     throw error;
   }
@@ -165,10 +178,18 @@ function saveAuditMessagesToSpreadsheet(spreadsheet, userId, messages) {
   const rows = [];
   
   messages.forEach(msg => {
+    // 送信者名を取得して正規化
+    let senderName = msg.senderName || msg.senderId || userName;
+    
+    // 名前マッピングを適用
+    if (typeof normalizeName === 'function') {
+      senderName = normalizeName(senderName);
+    }
+    
     // 監査ログの構造に合わせて変換
     const row = [
       new Date(msg.logTime || msg.sendTime),  // 日時
-      msg.senderName || msg.senderId || userName,  // 送信者
+      senderName,  // 送信者（正規化済み）
       `[Audit] ${userName}とのチャット`,  // ルーム名
       msg.content || msg.text || '',  // メッセージ
       msg.attachments ? msg.attachments.length + '件' : '',  // 添付ファイル

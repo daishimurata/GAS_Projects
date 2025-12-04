@@ -30,6 +30,140 @@ function getMasterSpreadsheet() {
 }
 
 /**
+ * 在庫管理専用チャットログスプレッドシートを取得または作成
+ * @return {GoogleAppsScript.Spreadsheet.Spreadsheet} スプレッドシート
+ */
+function getStockChatLogSpreadsheet() {
+  if (!CONFIG.STOCK_MANAGEMENT || !CONFIG.STOCK_MANAGEMENT.STOCK_CHAT_LOG || !CONFIG.STOCK_MANAGEMENT.STOCK_CHAT_LOG.ENABLED) {
+    return null;
+  }
+  
+  const folder = getOrCreateFolder(
+    CONFIG.GOOGLE_DRIVE.ROOT_FOLDER_NAME + '/' + 
+    CONFIG.GOOGLE_DRIVE.CHAT_LOG_FOLDER
+  );
+  const fileName = CONFIG.STOCK_MANAGEMENT.STOCK_CHAT_LOG.SPREADSHEET_NAME;
+  
+  let spreadsheet;
+  const file = findFileInFolder(folder, fileName);
+  
+  if (file) {
+    spreadsheet = SpreadsheetApp.open(file);
+  } else {
+    spreadsheet = SpreadsheetApp.create(fileName);
+    DriveApp.getFileById(spreadsheet.getId()).moveTo(folder);
+    initializeStockChatLogSpreadsheet(spreadsheet);
+    logInfo('在庫管理専用チャットログスプレッドシートを新規作成しました');
+  }
+  
+  return spreadsheet;
+}
+
+/**
+ * 在庫管理専用チャットログスプレッドシートを初期化
+ * @param {GoogleAppsScript.Spreadsheet.Spreadsheet} spreadsheet スプレッドシート
+ */
+function initializeStockChatLogSpreadsheet(spreadsheet) {
+  // シート1: メッセージ一覧
+  const messageSheet = spreadsheet.getActiveSheet();
+  messageSheet.setName(CONFIG.STOCK_MANAGEMENT.STOCK_CHAT_LOG.SHEET_NAME);
+  messageSheet.getRange('A1:J1').setValues([[
+    '日時', '送信者', 'ルーム名', 'メッセージ', '添付ファイル',
+    'メッセージID', 'チャンネルID', 'キーワード', 'カテゴリ', '処理済み'
+  ]]);
+  messageSheet.setFrozenRows(1);
+  messageSheet.getRange('A1:J1').setFontWeight('bold');
+  messageSheet.getRange('A1:J1').setBackground('#4285f4');
+  messageSheet.getRange('A1:J1').setFontColor('#ffffff');
+  
+  // スプレッドシート全体の設定
+  spreadsheet.setSpreadsheetTimeZone('Asia/Tokyo');
+  spreadsheet.setActiveSheet(messageSheet);
+}
+
+/**
+ * 在庫管理専用チャンネルのメッセージを専用スプレッドシートに保存
+ * @param {Object} channel チャンネル情報
+ * @param {Array} messages メッセージリスト
+ * @return {number} 保存されたメッセージ数
+ */
+function saveStockChatMessagesToSpreadsheet(channel, messages) {
+  if (!CONFIG.STOCK_MANAGEMENT || !CONFIG.STOCK_MANAGEMENT.STOCK_CHAT_LOG || !CONFIG.STOCK_MANAGEMENT.STOCK_CHAT_LOG.ENABLED) {
+    return 0;
+  }
+  
+  const spreadsheet = getStockChatLogSpreadsheet();
+  if (!spreadsheet) {
+    return 0;
+  }
+  
+  const sheet = spreadsheet.getSheetByName(CONFIG.STOCK_MANAGEMENT.STOCK_CHAT_LOG.SHEET_NAME);
+  if (!sheet) {
+    throw new Error('在庫管理チャットログのメッセージ一覧シートが見つかりません');
+  }
+  
+  const rows = [];
+  
+  messages.forEach(msg => {
+    try {
+      // キーワード抽出
+      const keywords = CONFIG.GEMINI_OPTIMIZATION.ENABLE_KEYWORD_EXTRACTION ?
+        extractKeywords(msg.text || '') : [];
+      
+      // カテゴリ分類
+      const category = CONFIG.GEMINI_OPTIMIZATION.ENABLE_AUTO_CATEGORIZATION ?
+        categorizeMessage(msg.text || '') : '';
+      
+      // 添付ファイル情報
+      const attachmentInfo = msg.attachments && msg.attachments.length > 0 ?
+        `${msg.attachments.length}件` : '';
+      
+      // 送信者名を取得して正規化
+      let senderName = '不明';
+      if (msg.user) {
+        senderName = msg.user.displayName || msg.user.userId || '不明';
+      } else if (msg.userName) {
+        senderName = msg.userName;
+      } else if (msg.senderName) {
+        senderName = msg.senderName;
+      }
+      
+      // 名前マッピングを適用
+      if (typeof normalizeName === 'function') {
+        senderName = normalizeName(senderName);
+      }
+      
+      rows.push([
+        new Date(msg.createdTime || msg.sendTime),
+        senderName,
+        channel.name || channel.channelId,
+        msg.text || '[画像/ファイル]',
+        attachmentInfo,
+        msg.messageId,
+        channel.channelId,
+        keywords.join(', '),
+        category,
+        '' // 処理済みフラグ（空=未処理）
+      ]);
+    } catch (error) {
+      logError(`在庫管理チャットメッセージ処理エラー: ${msg.messageId}`, error);
+    }
+  });
+  
+  if (rows.length > 0) {
+    rows.reverse();
+    
+    // 既存データの上に挿入
+    sheet.insertRowsAfter(1, rows.length);
+    sheet.getRange(2, 1, rows.length, 10).setValues(rows);
+    
+    logInfo(`在庫管理専用チャットログに${rows.length}件のメッセージを保存`);
+  }
+  
+  return rows.length;
+}
+
+/**
  * マスタースプレッドシートを初期化
  * @param {GoogleAppsScript.Spreadsheet.Spreadsheet} spreadsheet スプレッドシート
  */
@@ -144,9 +278,24 @@ function saveMessagesToSpreadsheet(spreadsheet, channel, messages) {
       // メッセージURL（存在する場合）
       const messageUrl = msg.url || '';
       
+      // 送信者名を取得して正規化
+      let senderName = '不明';
+      if (msg.user) {
+        senderName = msg.user.displayName || msg.user.userId || '不明';
+      } else if (msg.userName) {
+        senderName = msg.userName;
+      } else if (msg.senderName) {
+        senderName = msg.senderName;
+      }
+      
+      // 名前マッピングを適用
+      if (typeof normalizeName === 'function') {
+        senderName = normalizeName(senderName);
+      }
+      
       rows.push([
         new Date(msg.createdTime || msg.sendTime),
-        msg.user ? (msg.user.displayName || msg.user.userId) : '不明',
+        senderName,
         channel.name || channel.channelId,
         msg.text || '[画像/ファイル]',
         attachmentInfo,

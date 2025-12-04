@@ -50,8 +50,13 @@ function syncChatLogs() {
         logWarning('Botが参加しているチャンネルがありません');
       }
     } catch (error) {
-      logWarning('Bot API利用不可: ' + error.message);
-      stats.errors.push(`Bot API: ${error.message}`);
+      // 404エラーは想定内なので警告のみ
+      if (error.message && error.message.includes('404')) {
+        logWarning('Bot API利用不可 (想定内): Webhook経由でメッセージを取得してください。');
+      } else {
+        logWarning('Bot API利用不可: ' + error.message);
+        stats.errors.push(`Bot API: ${error.message}`);
+      }
       stats.channelsTotal = 0;
       channels = [];
     }
@@ -74,8 +79,13 @@ function syncChatLogs() {
       stats.auditUsersTotal = 1;
       
     } catch (error) {
-      logWarning('Audit API取得エラー（スキップします）: ' + error.message);
-      stats.errors.push(`Audit API: ${error.message}`);
+      // 404エラーは想定内なので警告のみ
+      if (error.message && error.message.includes('404')) {
+        logWarning('Audit API利用不可 (想定内): Webhook経由でメッセージを取得してください。');
+      } else {
+        logWarning('Audit API取得エラー（スキップします）: ' + error.message);
+        stats.errors.push(`Audit API: ${error.message}`);
+      }
     }
     
     // 各チャンネルを同期（Bot API）
@@ -95,29 +105,49 @@ function syncChatLogs() {
           stats.messagesTotal += messages.length;
           
           if (messages.length > 0) {
-            // スプレッドシートに保存
-            const savedCount = saveMessagesToSpreadsheet(masterSheet, channel, messages);
-            stats.messagesSaved += savedCount;
+            // 在庫管理専用チャンネルかどうかを判定
+            const isStockChannel = CONFIG.STOCK_MANAGEMENT && 
+                                  CONFIG.STOCK_MANAGEMENT.STOCK_CHAT_LOG && 
+                                  CONFIG.STOCK_MANAGEMENT.STOCK_CHAT_LOG.ENABLED &&
+                                  channel.channelId === CONFIG.STOCK_MANAGEMENT.STOCK_CHAT_LOG.CHANNEL_ID;
+            
+            if (isStockChannel) {
+              // 在庫管理専用チャンネルの場合は専用スプレッドシートに保存
+              const savedCount = saveStockChatMessagesToSpreadsheet(channel, messages);
+              stats.messagesSaved += savedCount;
+              logInfo(`  在庫管理専用チャットログに保存: ${savedCount}件`);
+            } else {
+              // 通常のチャットログはマスタースプレッドシートに保存
+              const savedCount = saveMessagesToSpreadsheet(masterSheet, channel, messages);
+              stats.messagesSaved += savedCount;
+            }
             
             // 在庫管理連携: チャットから在庫補充を検知
-            messages.forEach(msg => {
-              try {
-                const content = msg.content || msg.text || '';
-                // ユーザー名取得
-                let sender = '不明';
-                if (msg.user && msg.user.name) sender = msg.user.name;
-                else if (msg.userName) sender = msg.userName;
-                else if (msg.senderName) sender = msg.senderName;
-                
-                const date = new Date(msg.createdTime || msg.sendTime || new Date());
-                
-                if (content && typeof updateStockFromChatMessage === 'function') {
-                  updateStockFromChatMessage(content, sender, date);
-                }
-              } catch (e) {
-                logError('在庫連携エラー', e);
-              }
-            });
+            // 注意: チャットログからの在庫更新は無効化されています
+            // スタッフからの在庫情報は専用チャンネル（7d6b452d-2dce-09ac-7663-a2f47d622e91）に手動で入力してください
+            // messages.forEach(msg => {
+            //   try {
+            //     const content = msg.content || msg.text || '';
+            //     // ユーザー名取得
+            //     let sender = '不明';
+            //     if (msg.user && msg.user.name) sender = msg.user.name;
+            //     else if (msg.userName) sender = msg.userName;
+            //     else if (msg.senderName) sender = msg.senderName;
+            //     
+            //     // 名前マッピングを適用
+            //     if (typeof normalizeName === 'function') {
+            //       sender = normalizeName(sender);
+            //     }
+            //     
+            //     const date = new Date(msg.createdTime || msg.sendTime || new Date());
+            //     
+            //     if (content && typeof updateStockFromChatMessage === 'function') {
+            //       updateStockFromChatMessage(content, sender, date);
+            //     }
+            //   } catch (e) {
+            //     logError('在庫連携エラー', e);
+            //   }
+            // });
             
             // テキストログに保存
             saveMessagesToTextLog(channel, messages);
@@ -187,6 +217,17 @@ function syncChatLogs() {
   }
   
   logInfo('========================================');
+  
+  // 名前マッピングを収集（定期的に実行）
+  if (stats.messagesSaved > 0) {
+    try {
+      logInfo('\n--- 名前マッピング収集 ---');
+      collectUnknownNames();
+    } catch (error) {
+      logError('名前マッピング収集エラー', error);
+      // エラーでも処理は続行
+    }
+  }
   
   // 通知送信
   sendSyncNotification('chat', stats, duration);

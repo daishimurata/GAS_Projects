@@ -1,16 +1,15 @@
 /**
  * Gmail同期機能
- * 売上関連のメールのみを保存・通知
+ * Gmailを監視して重要なメールを保存・通知
  */
 
 /**
  * Gmail同期メイン処理
- * 売上関連のメール（ラベル「直売所売上」、件名に「売上」または「速報」を含む）のみを処理
  * @return {Object} 同期結果の統計情報
  */
 function syncGmail() {
   logInfo('========================================');
-  logInfo('📧 Gmail同期開始（売上関連メールのみ）');
+  logInfo('📧 Gmail同期開始');
   logInfo('========================================');
   
   const startTime = new Date();
@@ -19,17 +18,13 @@ function syncGmail() {
     newEmails: 0,
     importantEmails: 0,
     attachmentsSaved: 0,
-    errors: [],
-    spreadsheetUrl: null
+    errors: []
   };
   
   try {
     // マスタースプレッドシート準備
     const spreadsheet = getGmailMasterSpreadsheet();
-    stats.spreadsheetUrl = spreadsheet.getUrl();
     logInfo(`スプレッドシート: ${spreadsheet.getName()}`);
-    logInfo(`📊 保存先URL: ${stats.spreadsheetUrl}`);
-    logInfo(`保存場所: マイドライブ/${CONFIG.GOOGLE_DRIVE.ROOT_FOLDER_NAME}/Gmailログ/`);
     
     // 最終同期時刻を取得
     const lastSyncTime = getGmailLastSyncTime();
@@ -44,17 +39,6 @@ function syncGmail() {
     stats.totalChecked = threads.length;
     logInfo(`取得スレッド: ${threads.length}件`);
     
-    // 処理済みでないメールの数をカウント
-    let unprocessedCount = 0;
-    threads.forEach(thread => {
-      thread.getMessages().forEach(message => {
-        if (!isMessageProcessed(message.getId())) {
-          unprocessedCount++;
-        }
-      });
-    });
-    logInfo(`未処理メール: ${unprocessedCount}件`);
-    
     if (threads.length === 0) {
       logInfo('新しいメールはありません');
     } else {
@@ -64,22 +48,10 @@ function syncGmail() {
           const messages = thread.getMessages();
           
           messages.forEach(message => {
-            const messageId = message.getId();
-            const subject = message.getSubject();
-            const from = message.getFrom();
-            
             // 既に処理済みかチェック
-            if (isMessageProcessed(messageId)) {
-              const processedTime = getProperty(`GMAIL_PROCESSED_${messageId}`);
-              logInfo(`⏭️ スキップ: ${subject}`);
-              logInfo(`   理由: 既に処理済み (処理時刻: ${processedTime || '不明'})`);
-              logInfo(`   メッセージID: ${messageId}`);
+            if (isMessageProcessed(message.getId())) {
               return;
             }
-            
-            logInfo(`📧 処理中: ${subject}`);
-            logInfo(`   送信者: ${from}`);
-            logInfo(`   日時: ${formatDateTime(message.getDate())}`);
             
             // メッセージデータを抽出
             const emailData = extractEmailData(message);
@@ -92,7 +64,6 @@ function syncGmail() {
             // スプレッドシートに保存
             saveEmailToSpreadsheet(spreadsheet, emailData);
             stats.newEmails++;
-            logInfo(`   ✅ 保存完了`);
             
             // 重要メールの場合
             if (importance >= 8) {
@@ -148,18 +119,8 @@ function syncGmail() {
   logInfo(`添付ファイル: ${stats.attachmentsSaved}件`);
   logInfo(`処理時間: ${duration}秒`);
   
-  if (stats.newEmails > 0 && stats.spreadsheetUrl) {
-    logInfo(`\n📊 保存先スプレッドシート:`);
-    logInfo(`   ${stats.spreadsheetUrl}`);
-  }
-  
-  if (stats.totalChecked > 0 && stats.newEmails === 0) {
-    logInfo(`\n💡 ヒント: 全てのメールが既に処理済みです。`);
-    logInfo(`   再処理する場合は clearProcessedMark() を実行してください。`);
-  }
-  
   if (stats.errors.length > 0) {
-    logInfo(`\n⚠️ エラー: ${stats.errors.length}件`);
+    logInfo(`エラー: ${stats.errors.length}件`);
   }
   
   logInfo('========================================');
@@ -169,34 +130,31 @@ function syncGmail() {
 
 /**
  * Gmail検索クエリを構築
- * 売上関連のメールのみを対象とする（既読・未読問わず、未保存なら保存）
- * 3週間（21日）前まで遡って検索
  * @param {Date} lastSyncTime 最終同期時刻
  * @return {string} 検索クエリ
  */
 function buildGmailSearchQuery(lastSyncTime) {
-  // 在庫管理の検索クエリをベースにする
-  let baseQuery = CONFIG.STOCK_MANAGEMENT.GMAIL_QUERY;
+  const queries = [];
   
-  // 3週間前の日付を計算
-  const threeWeeksAgo = new Date();
-  threeWeeksAgo.setDate(threeWeeksAgo.getDate() - 21); // 21日前
-  const afterDate = Utilities.formatDate(threeWeeksAgo, 'UTC', 'yyyy/MM/dd');
-  
-  // 最終同期時刻以降の条件を追加
+  // 最終同期時刻以降（または過去7日間）
   if (lastSyncTime) {
-    // 最終同期時刻の1日前から検索（タイムゾーンのずれを考慮）
-    const searchFrom = new Date(lastSyncTime);
-    searchFrom.setDate(searchFrom.getDate() - 1); // 1日前から検索
-    const lastSyncDate = Utilities.formatDate(searchFrom, 'UTC', 'yyyy/MM/dd');
-    
-    // 3週間前と最終同期時刻のうち、より新しい方を使用
-    const useDate = lastSyncDate > afterDate ? afterDate : lastSyncDate;
-    return `${baseQuery} after:${useDate}`;
+    const afterDate = Utilities.formatDate(lastSyncTime, 'UTC', 'yyyy/MM/dd');
+    queries.push(`after:${afterDate}`);
   } else {
-    // 初回実行時は3週間前から検索
-    return `${baseQuery} after:${afterDate}`;
+    // 初回実行時は過去7日間
+    const daysBack = (CONFIG.GMAIL && CONFIG.GMAIL.INITIAL_DAYS) || 7;
+    queries.push(`newer_than:${daysBack}d`);
   }
+  
+  // 受信トレイのみ（送信済みは除外）
+  queries.push('in:inbox');
+  
+  // カスタムフィルター（設定で指定可能）
+  if (CONFIG.GMAIL && CONFIG.GMAIL.SEARCH_FILTERS) {
+    queries.push(...CONFIG.GMAIL.SEARCH_FILTERS);
+  }
+  
+  return queries.join(' ');
 }
 
 /**
@@ -319,120 +277,29 @@ function saveEmailToSpreadsheet(spreadsheet, emailData) {
     
     // ヘッダー行を作成
     const headers = [
-      '日時', '送信者', '宛先', '件名', '本文', 'カテゴリ', '重要度',
+      '日時', '送信者', '宛先', '件名', 'カテゴリ', '重要度',
       '添付', 'ラベル', 'スター', '未読', 'メッセージID', 'URL'
     ];
     sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
     sheet.getRange(1, 1, 1, headers.length).setFontWeight('bold');
     sheet.setFrozenRows(1);
-    
-    // 列幅設定
-    sheet.setColumnWidth(1, 180); // 日時
-    sheet.setColumnWidth(2, 200); // 送信者
-    sheet.setColumnWidth(3, 200); // 宛先
-    sheet.setColumnWidth(4, 300); // 件名
-    sheet.setColumnWidth(5, 500); // 本文
-    sheet.setColumnWidth(6, 120); // カテゴリ
-    sheet.setColumnWidth(7, 80);  // 重要度
-    sheet.setColumnWidth(8, 80);  // 添付
-    sheet.setColumnWidth(9, 200); // ラベル
-    sheet.setColumnWidth(10, 60); // スター
-    sheet.setColumnWidth(11, 60); // 未読
-    sheet.setColumnWidth(12, 200); // メッセージID
-    sheet.setColumnWidth(13, 300); // URL
-  } else {
-    // 既存のシートに「本文」列があるかチェック
-    const lastColumn = sheet.getLastColumn();
-    
-    if (lastColumn === 0) {
-      // シートが空の場合は新規作成と同じ処理
-      const headers = [
-        '日時', '送信者', '宛先', '件名', '本文', 'カテゴリ', '重要度',
-        '添付', 'ラベル', 'スター', '未読', 'メッセージID', 'URL'
-      ];
-      sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
-      sheet.getRange(1, 1, 1, headers.length).setFontWeight('bold');
-      sheet.setFrozenRows(1);
-      
-      // 列幅設定
-      sheet.setColumnWidth(1, 180); // 日時
-      sheet.setColumnWidth(2, 200); // 送信者
-      sheet.setColumnWidth(3, 200); // 宛先
-      sheet.setColumnWidth(4, 300); // 件名
-      sheet.setColumnWidth(5, 500); // 本文
-      sheet.setColumnWidth(6, 120); // カテゴリ
-      sheet.setColumnWidth(7, 80);  // 重要度
-      sheet.setColumnWidth(8, 80);  // 添付
-      sheet.setColumnWidth(9, 200); // ラベル
-      sheet.setColumnWidth(10, 60); // スター
-      sheet.setColumnWidth(11, 60); // 未読
-      sheet.setColumnWidth(12, 200); // メッセージID
-      sheet.setColumnWidth(13, 300); // URL
-      
-      logInfo('空のシートにヘッダーを設定しました');
-    } else {
-      // 既存のヘッダーを取得
-      const headers = sheet.getRange(1, 1, 1, lastColumn).getValues()[0];
-      const bodyColumnIndex = headers.indexOf('本文');
-      
-      if (bodyColumnIndex === -1) {
-        // 「本文」列がない場合は追加（件名の後、カテゴリの前）
-        const categoryIndex = headers.indexOf('カテゴリ');
-        const subjectIndex = headers.indexOf('件名');
-        const insertColumn = categoryIndex > -1 ? categoryIndex : (subjectIndex > -1 ? subjectIndex + 1 : 5);
-        
-        sheet.insertColumnAfter(insertColumn - 1);
-        sheet.getRange(1, insertColumn).setValue('本文');
-        sheet.getRange(1, insertColumn).setFontWeight('bold');
-        sheet.setColumnWidth(insertColumn, 500);
-        
-        logInfo(`「本文」列を追加しました（${insertColumn}列目）`);
-      }
-    }
   }
   
   // データ行を作成
-  // 本文は長すぎる場合は切り詰め（スプレッドシートのセル制限を考慮）
-  const bodyText = emailData.body || '';
-  const maxBodyLength = 50000; // スプレッドシートのセル制限（約50,000文字）
-  const truncatedBody = bodyText.length > maxBodyLength 
-    ? bodyText.substring(0, maxBodyLength) + '\n\n...（本文が長いため切り詰めました）'
-    : bodyText;
-  
-  // ヘッダーを確認して列の順序を決定
-  const currentLastColumn = sheet.getLastColumn();
-  
-  if (currentLastColumn === 0) {
-    logError('シートにヘッダーがありません', new Error('Empty sheet'));
-    return;
-  }
-  
-  const currentHeaders = sheet.getRange(1, 1, 1, currentLastColumn).getValues()[0];
-  
-  // データマップ
-  const dataMap = {
-    '日時': emailData.date,
-    '送信者': emailData.from,
-    '宛先': emailData.to,
-    '件名': emailData.subject,
-    '本文': truncatedBody,
-    'カテゴリ': emailData.category,
-    '重要度': emailData.importance,
-    '添付': emailData.attachments.length > 0 ? emailData.attachments.length + '件' : '',
-    'ラベル': emailData.labels.join(', '),
-    'スター': emailData.isStarred ? '★' : '',
-    '未読': emailData.isUnread ? '●' : '',
-    'メッセージID': emailData.messageId,
-    'URL': emailData.url
-  };
-  
-  // ヘッダーの順序に従って行データを作成
-  const row = currentHeaders.map(header => {
-    if (!header || header === '') {
-      return ''; // 空のヘッダーの場合は空文字
-    }
-    return dataMap[header] !== undefined ? dataMap[header] : '';
-  });
+  const row = [
+    emailData.date,
+    emailData.from,
+    emailData.to,
+    emailData.subject,
+    emailData.category,
+    emailData.importance,
+    emailData.attachments.length > 0 ? emailData.attachments.length + '件' : '',
+    emailData.labels.join(', '),
+    emailData.isStarred ? '★' : '',
+    emailData.isUnread ? '●' : '',
+    emailData.messageId,
+    emailData.url
+  ];
   
   // 2行目に挿入（最新が上）
   sheet.insertRowAfter(1);
@@ -635,8 +502,7 @@ function setGmailLastSyncTime(time) {
  */
 function isMessageProcessed(messageId) {
   const key = `GMAIL_PROCESSED_${messageId}`;
-  const processed = getProperty(key) !== null;
-  return processed;
+  return getProperty(key) !== null;
 }
 
 /**
@@ -666,39 +532,6 @@ function executeGmailSync() {
     sendErrorNotification('Gmail同期失敗', error, 'executeGmailSync');
     throw error;
   }
-}
-
-/**
- * 処理済みマークをクリア（デバッグ用）
- * 指定したメッセージIDの処理済みマークを削除
- * @param {string} messageId メッセージID（省略時は全てクリア）
- */
-function clearProcessedMark(messageId = null) {
-  if (messageId) {
-    const key = `GMAIL_PROCESSED_${messageId}`;
-    deleteProperty(key);
-    logInfo(`処理済みマークをクリアしました: ${messageId}`);
-  } else {
-    // 全ての処理済みマークをクリア
-    const allProps = getAllProperties();
-    let clearedCount = 0;
-    
-    Object.keys(allProps).forEach(key => {
-      if (key.startsWith('GMAIL_PROCESSED_')) {
-        deleteProperty(key);
-        clearedCount++;
-      }
-    });
-    
-    logInfo(`処理済みマークを${clearedCount}件クリアしました`);
-  }
-}
-
-/**
- * 全てのプロパティを取得（デバッグ用）
- */
-function getAllProperties() {
-  return PropertiesService.getScriptProperties().getProperties();
 }
 
 /**

@@ -138,6 +138,21 @@ lmOIERU57WE+FJu1djWc8R+K
     DAILY_REPORT: {
       ENABLED: false,
       TIME: '18:00'
+    },
+    // 在庫管理・売上管理用LINE WORKSチャンネル設定
+    LINE_CHANNEL: {
+      ENABLED: true,
+      CHANNEL_ID: '7d6b452d-2dce-09ac-7663-a2f47d622e91', // 在庫管理・売上管理用チャンネル
+      NOTIFY_SHIPMENT: true,  // 出荷情報を通知
+      NOTIFY_SALES: true,     // 売上情報を通知
+      NOTIFY_STOCK_UPDATE: true  // 在庫更新を通知
+    },
+    // 在庫管理専用チャットログ設定
+    STOCK_CHAT_LOG: {
+      ENABLED: true,
+      CHANNEL_ID: '7d6b452d-2dce-09ac-7663-a2f47d622e91', // 在庫管理専用チャンネルID
+      SPREADSHEET_NAME: '在庫管理チャットログ', // 専用スプレッドシート名
+      SHEET_NAME: 'メッセージ一覧' // メッセージ保存シート名
     }
   }
 };

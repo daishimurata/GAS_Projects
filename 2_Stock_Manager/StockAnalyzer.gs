@@ -112,6 +112,13 @@ function analyzeStockFromGmailLog() {
     // LINE通知を送信
     if (notifications.length > 0) {
       sendStockUpdateNotification(notifications, stats);
+      
+      // LINE WORKSチャンネルに売上情報を通知
+      notifications.forEach(notification => {
+        if (typeof notifySalesToLine === 'function') {
+          notifySalesToLine(notification.storeName, notification.items, notification.date);
+        }
+      });
     }
     
     // 在庫警告通知
@@ -430,8 +437,9 @@ function updateStockFromAnalysis(analysisResult, stockSheet, logSheet, stockMap,
     // 列インデックスを動的に取得
     const headers = stockSheet.getRange(1, 1, 1, stockSheet.getLastColumn()).getValues()[0];
     
-    const stockColIndex = headers.indexOf('現在庫') >= 0 ? headers.indexOf('現在庫') + 1 : 
-                         headers.indexOf('在庫数') >= 0 ? headers.indexOf('在庫数') + 1 : 4;
+    // 「現在庫」または「在庫数」の列を探す
+    const stockColIndex = (headers.indexOf('現在庫') >= 0 ? headers.indexOf('現在庫') + 1 : 
+                          (headers.indexOf('在庫数') >= 0 ? headers.indexOf('在庫数') + 1 : 4));
     const unitPriceColIndex = headers.indexOf('単価') >= 0 ? headers.indexOf('単価') + 1 : 0;
     const totalSalesColIndex = headers.indexOf('累計販売数') >= 0 ? headers.indexOf('累計販売数') + 1 : 0;
     const totalRevenueColIndex = headers.indexOf('累計売上金額') >= 0 ? headers.indexOf('累計売上金額') + 1 : 0;
@@ -477,6 +485,17 @@ function updateStockFromAnalysis(analysisResult, stockSheet, logSheet, stockMap,
     // スプレッドシートを更新（数値型で確実に書き込む）
     if (stockColIndex > 0) {
       stockSheet.getRange(stockInfo.rowIndex, stockColIndex).setValue(newStock); // 現在庫
+    }
+    
+    // E列（販売数）を更新（既存の値に加算）
+    const salesColIndex = headers.indexOf('販売数') >= 0 ? headers.indexOf('販売数') + 1 : 0;
+    if (salesColIndex > 0) {
+      const currentSales = parseInt(stockSheet.getRange(stockInfo.rowIndex, salesColIndex).getValue(), 10) || 0;
+      const newSales = currentSales + soldCount;
+      const salesRange = stockSheet.getRange(stockInfo.rowIndex, salesColIndex);
+      salesRange.setNumberFormat('0'); // 数値形式を明示的に設定
+      salesRange.setValue(newSales);
+      logInfo(`  📊 販売数: ${currentSales} → ${newSales} (+${soldCount})`);
     }
     
     if (unitPriceColIndex > 0 && unitPrice > 0) {

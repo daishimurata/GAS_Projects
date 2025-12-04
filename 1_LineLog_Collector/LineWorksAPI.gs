@@ -332,12 +332,26 @@ function getLineWorksBotChannels() {
     const responseCode = response.getResponseCode();
     
     if (responseCode !== 200) {
-      throw new Error(`API Error (${responseCode}): ${response.getContentText()}`);
+      const errorBody = response.getContentText();
+      
+      // 404エラーは想定内（APIが利用できない場合）
+      if (responseCode === 404) {
+        logWarning(`Bot API利用不可 (404): APIが存在しないか、権限がありません。Webhook経由でメッセージを取得してください。`);
+        return []; // 空の配列を返して処理を続行
+      }
+      
+      throw new Error(`API Error (${responseCode}): ${errorBody}`);
     }
     
     const data = JSON.parse(response.getContentText());
     return data.channels || [];
   } catch (error) {
+    // 404エラーの場合は警告のみで処理を続行
+    if (error.message && error.message.includes('404')) {
+      logWarning(`Bot API利用不可: ${error.message}。Webhook経由でメッセージを取得してください。`);
+      return [];
+    }
+    
     logError('チャンネル一覧取得エラー', error);
     throw error;
   }
@@ -468,6 +482,63 @@ function sendLineWorksMessage(userId, message) {
     return true;
   } catch (error) {
     logError('メッセージ送信エラー', error);
+    return false;
+  }
+}
+
+/**
+ * チャンネル（グループチャット）にメッセージを送信
+ * @param {string} channelId 送信先チャンネルID
+ * @param {string} message メッセージ本文
+ * @return {boolean} 送信成功/失敗
+ */
+function sendLineWorksChannelMessage(channelId, message) {
+  const token = getBotAccessToken();
+  if (!token) {
+    logError('Botアクセストークンの取得に失敗しました');
+    return false;
+  }
+  
+  if (!channelId) {
+    logWarning('チャンネルIDが設定されていません');
+    return false;
+  }
+  
+  const url = CONFIG.ENDPOINTS.CHANNEL_MESSAGES
+    .replace('{botId}', CONFIG.LINEWORKS.BOT_ID)
+    .replace('{channelId}', encodeURIComponent(channelId));
+  
+  const payload = {
+    content: {
+      type: 'text',
+      text: message
+    }
+  };
+  
+  const options = {
+    method: 'post',
+    headers: {
+      'Authorization': `Bearer ${token}`,
+      'Content-Type': 'application/json'
+    },
+    payload: JSON.stringify(payload),
+    muteHttpExceptions: true
+  };
+  
+  try {
+    const response = UrlFetchApp.fetch(url, options);
+    const responseCode = response.getResponseCode();
+    
+    if (responseCode !== 200 && responseCode !== 201) {
+      const errorText = response.getContentText();
+      logError(`チャンネルメッセージ送信エラー (${responseCode}): ${errorText}`);
+      return false;
+    }
+    
+    logInfo(`チャンネルメッセージ送信成功: ${channelId}`);
+    return true;
+  } catch (error) {
+    logError('チャンネルメッセージ送信エラー', error);
     return false;
   }
 }

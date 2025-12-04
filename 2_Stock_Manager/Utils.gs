@@ -186,11 +186,26 @@ function sendErrorNotification(title, error, context = '') {
  */
 function updateDailySalesSummary(spreadsheet, storeName, date, salesData) {
   try {
+    logInfo(`日次売上サマリー更新開始: 店舗=${storeName}, 日付=${date}, データ件数=${salesData.length}`);
+    
     let dailySalesSheet = spreadsheet.getSheetByName('日次売上サマリー');
     
     if (!dailySalesSheet) {
       logWarning('日次売上サマリーシートが見つかりません');
       return;
+    }
+    
+    // 変更履歴シートを取得または作成
+    let historySheet = spreadsheet.getSheetByName('日次売上サマリー変更履歴');
+    if (!historySheet) {
+      historySheet = spreadsheet.insertSheet('日次売上サマリー変更履歴');
+      const historyHeaders = ['変更日時', '日付', '店舗', '商品名', '追加した販売数', '追加した売上金額', '操作'];
+      historySheet.getRange(1, 1, 1, historyHeaders.length).setValues([historyHeaders]);
+      historySheet.getRange(1, 1, 1, historyHeaders.length).setFontWeight('bold');
+      historySheet.setFrozenRows(1);
+      historySheet.setColumnWidth(1, 180); // 変更日時
+      historySheet.setColumnWidth(3, 150); // 店舗
+      historySheet.setColumnWidth(4, 300); // 商品名
     }
     
     // 日付を YYYY-MM-DD 形式に変換
@@ -201,21 +216,62 @@ function updateDailySalesSummary(spreadsheet, storeName, date, salesData) {
     const data = dailySalesSheet.getDataRange().getValues();
     const headers = data[0];
     
+    logDebug(`日次売上サマリーのヘッダー: ${headers.join(', ')}`);
+    
     // ヘッダーの列インデックスを取得
     const dateIndex = headers.indexOf('日付');
     const storeIndex = headers.indexOf('店舗');
-    const itemCountIndex = headers.indexOf('商品数');
-    const totalSalesIndex = headers.indexOf('総販売数');
-    const totalRevenueIndex = headers.indexOf('総売上金額');
+    const itemNameIndex = headers.indexOf('商品名');
     
-    if (dateIndex === -1 || storeIndex === -1 || itemCountIndex === -1 || 
+    // 「その日の販売数」列を探す（「総販売数」からの移行も対応）
+    let totalSalesIndex = headers.indexOf('その日の販売数');
+    if (totalSalesIndex === -1) {
+      const oldTotalSalesIndex = headers.indexOf('総販売数');
+      if (oldTotalSalesIndex !== -1) {
+        dailySalesSheet.getRange(1, oldTotalSalesIndex + 1).setValue('その日の販売数');
+        totalSalesIndex = oldTotalSalesIndex;
+        logInfo('「総販売数」列を「その日の販売数」に変更しました');
+      } else {
+        logError('「その日の販売数」列も「総販売数」列も見つかりません');
+      }
+    }
+    
+    // 「その日の売上金額」列を探す（「総売上金額」からの移行も対応）
+    let totalRevenueIndex = headers.indexOf('その日の売上金額');
+    if (totalRevenueIndex === -1) {
+      const oldTotalRevenueIndex = headers.indexOf('総売上金額');
+      if (oldTotalRevenueIndex !== -1) {
+        dailySalesSheet.getRange(1, oldTotalRevenueIndex + 1).setValue('その日の売上金額');
+        totalRevenueIndex = oldTotalRevenueIndex;
+        logInfo('「総売上金額」列を「その日の売上金額」に変更しました');
+      } else {
+        logError('「その日の売上金額」列も「総売上金額」列も見つかりません');
+      }
+    }
+    
+    // 「商品数」列がある場合は「商品名」に変更（後方互換性のため）
+    let itemNameColIndex = itemNameIndex;
+    if (itemNameIndex === -1) {
+      const itemCountIndex = headers.indexOf('商品数');
+      if (itemCountIndex !== -1) {
+        dailySalesSheet.getRange(1, itemCountIndex + 1).setValue('商品名');
+        dailySalesSheet.setColumnWidth(itemCountIndex + 1, 300);
+        itemNameColIndex = itemCountIndex;
+        logInfo('「商品数」列を「商品名」に変更しました');
+      }
+    }
+    
+    if (dateIndex === -1 || storeIndex === -1 || itemNameColIndex === -1 || 
         totalSalesIndex === -1 || totalRevenueIndex === -1) {
-      logError('日次売上サマリーシートのヘッダーが不正です');
+      logError(`日次売上サマリーシートのヘッダーが不正です。見つかった列: 日付=${dateIndex}, 店舗=${storeIndex}, 商品名=${itemNameColIndex}, その日の販売数=${totalSalesIndex}, その日の売上金額=${totalRevenueIndex}`);
+      logError(`実際のヘッダー: ${headers.join(', ')}`);
       return;
     }
     
     // 既存の行を検索（日付と店舗で一致）
     let existingRowIndex = -1;
+    logDebug(`既存行を検索中: 日付=${dateStr}, 店舗=${storeName}`);
+    
     for (let i = 1; i < data.length; i++) {
       const rowDate = data[i][dateIndex];
       const rowStore = data[i][storeIndex];
@@ -225,47 +281,125 @@ function updateDailySalesSummary(spreadsheet, storeName, date, salesData) {
       if (rowDate instanceof Date) {
         rowDateStr = Utilities.formatDate(rowDate, 'Asia/Tokyo', 'yyyy-MM-dd');
       } else if (typeof rowDate === 'string') {
-        rowDateStr = rowDate;
+        // 文字列の場合はそのまま使用（既にyyyy-MM-dd形式の可能性）
+        rowDateStr = rowDate.trim();
+        // スラッシュ区切りの場合は変換
+        if (rowDateStr.includes('/')) {
+          const dateObj = new Date(rowDateStr);
+          if (!isNaN(dateObj.getTime())) {
+            rowDateStr = Utilities.formatDate(dateObj, 'Asia/Tokyo', 'yyyy-MM-dd');
+          }
+        }
       }
+      
+      logDebug(`行${i + 1}: 日付=${rowDateStr} (元の値: ${rowDate}, 型: ${typeof rowDate}), 店舗=${rowStore}`);
       
       if (rowDateStr === dateStr && rowStore === storeName) {
         existingRowIndex = i + 1; // スプレッドシートの行番号（1ベース）
+        logInfo(`既存行が見つかりました: 行${existingRowIndex}`);
         break;
       }
     }
     
+    if (existingRowIndex === -1) {
+      logInfo(`既存行が見つかりませんでした。新しい行を追加します。`);
+    }
+    
     // 売上データを集計
-    const itemCount = salesData.length;
-    const totalSoldCount = salesData.reduce((sum, item) => sum + (parseInt(item.soldCount, 10) || 0), 0);
-    const totalRevenue = salesData.reduce((sum, item) => sum + (parseInt(item.salesAmount || 0, 10) || 0), 0);
+    logDebug(`売上データ件数: ${salesData.length}`);
+    logDebug(`売上データ: ${JSON.stringify(salesData)}`);
+    
+    const totalSoldCount = salesData.reduce((sum, item) => {
+      const count = parseInt(item.soldCount, 10) || 0;
+      logDebug(`商品: ${item.itemName}, 販売数: ${count}`);
+      return sum + count;
+    }, 0);
+    
+    const totalRevenue = salesData.reduce((sum, item) => {
+      const amount = parseInt(item.salesAmount || 0, 10) || 0;
+      logDebug(`商品: ${item.itemName}, 売上金額: ${amount}`);
+      return sum + amount;
+    }, 0);
+    
+    logDebug(`集計結果 - その日の販売数: ${totalSoldCount}, その日の売上金額: ${totalRevenue}`);
+    
+    // 商品名のリストを作成（重複を避ける）
+    const itemNames = [...new Set(salesData.map(item => item.itemName))];
+    const itemNamesStr = itemNames.join('、');
     
     if (existingRowIndex > 0) {
       // 既存の行を更新（既存の値に加算）
-      const currentItemCount = parseInt(dailySalesSheet.getRange(existingRowIndex, itemCountIndex + 1).getValue(), 10) || 0;
-      const currentTotalSales = parseInt(dailySalesSheet.getRange(existingRowIndex, totalSalesIndex + 1).getValue(), 10) || 0;
-      const currentTotalRevenue = parseInt(dailySalesSheet.getRange(existingRowIndex, totalRevenueIndex + 1).getValue(), 10) || 0;
+      const currentItemNamesStr = dailySalesSheet.getRange(existingRowIndex, itemNameColIndex + 1).getValue() || '';
       
-      const newItemCount = currentItemCount + itemCount;
+      // 既存の販売数を読み取る（日付型の可能性を考慮）
+      const currentTotalSalesValue = dailySalesSheet.getRange(existingRowIndex, totalSalesIndex + 1).getValue();
+      let currentTotalSales = 0;
+      if (currentTotalSalesValue instanceof Date) {
+        logWarning(`既存の販売数が日付型です。0から開始します。行: ${existingRowIndex}, 列: ${totalSalesIndex + 1}`);
+        currentTotalSales = 0;
+      } else {
+        currentTotalSales = parseInt(currentTotalSalesValue, 10) || 0;
+      }
+      
+      // 既存の売上金額を読み取る（日付型の可能性を考慮）
+      const currentTotalRevenueValue = dailySalesSheet.getRange(existingRowIndex, totalRevenueIndex + 1).getValue();
+      let currentTotalRevenue = 0;
+      if (currentTotalRevenueValue instanceof Date) {
+        logWarning(`既存の売上金額が日付型です。0から開始します。行: ${existingRowIndex}, 列: ${totalRevenueIndex + 1}`);
+        currentTotalRevenue = 0;
+      } else {
+        currentTotalRevenue = parseInt(currentTotalRevenueValue, 10) || 0;
+      }
+      
+      logDebug(`既存データ - 商品名: ${currentItemNamesStr}, その日の販売数: ${currentTotalSales}, その日の売上金額: ${currentTotalRevenue}`);
+      
+      // 既存の商品名を解析（「商品名、商品名」の形式）
+      const existingItemNames = currentItemNamesStr ? currentItemNamesStr.split('、').map(name => name.trim()).filter(name => name) : [];
+      
+      // 既存の商品名と新しい商品名をマージ（重複を避ける）
+      const allItemNames = [...new Set([...existingItemNames, ...itemNames])];
+      const newItemNamesStr = allItemNames.join('、');
+      
       const newTotalSales = currentTotalSales + totalSoldCount;
       const newTotalRevenue = currentTotalRevenue + totalRevenue;
       
+      logDebug(`更新データ - 商品名: ${newItemNamesStr}, その日の販売数: ${currentTotalSales} + ${totalSoldCount} = ${newTotalSales}, その日の売上金額: ${currentTotalRevenue} + ${totalRevenue} = ${newTotalRevenue}`);
+      
+      // 商品名を更新
+      dailySalesSheet.getRange(existingRowIndex, itemNameColIndex + 1).setValue(newItemNamesStr);
+      
       // 数値形式を設定してから書き込む
-      dailySalesSheet.getRange(existingRowIndex, itemCountIndex + 1).setNumberFormat('0');
-      dailySalesSheet.getRange(existingRowIndex, itemCountIndex + 1).setValue(newItemCount);
+      const salesRange = dailySalesSheet.getRange(existingRowIndex, totalSalesIndex + 1);
+      salesRange.setNumberFormat('0'); // 数値形式を明示的に設定
+      salesRange.setValue(newTotalSales);
       
-      dailySalesSheet.getRange(existingRowIndex, totalSalesIndex + 1).setNumberFormat('0');
-      dailySalesSheet.getRange(existingRowIndex, totalSalesIndex + 1).setValue(newTotalSales);
+      const revenueRange = dailySalesSheet.getRange(existingRowIndex, totalRevenueIndex + 1);
+      revenueRange.setNumberFormat('#,##0'); // 数値形式を明示的に設定
+      revenueRange.setValue(newTotalRevenue);
       
-      dailySalesSheet.getRange(existingRowIndex, totalRevenueIndex + 1).setNumberFormat('#,##0');
-      dailySalesSheet.getRange(existingRowIndex, totalRevenueIndex + 1).setValue(newTotalRevenue);
+      // 書き込み後の値を確認（デバッグ用）
+      const verifySales = salesRange.getValue();
+      const verifyRevenue = revenueRange.getValue();
+      logDebug(`書き込み確認 - その日の販売数: ${verifySales} (型: ${typeof verifySales}), その日の売上金額: ${verifyRevenue} (型: ${typeof verifyRevenue})`);
       
-      logInfo(`  📊 日次売上サマリー更新: ${storeName} (${dateStr}) - 商品数: ${currentItemCount} → ${newItemCount}, 総販売数: ${currentTotalSales} → ${newTotalSales}, 総売上金額: ¥${currentTotalRevenue.toLocaleString()} → ¥${newTotalRevenue.toLocaleString()}`);
+      logInfo(`  📊 日次売上サマリー更新: ${storeName} (${dateStr}) - 商品名: ${newItemNamesStr}, その日の販売数: ${currentTotalSales} → ${newTotalSales}, その日の売上金額: ¥${currentTotalRevenue.toLocaleString()} → ¥${newTotalRevenue.toLocaleString()}`);
+      
+      // 変更履歴に記録
+      historySheet.appendRow([
+        new Date(),
+        dateStr,
+        storeName,
+        itemNamesStr,
+        totalSoldCount,
+        totalRevenue,
+        '追加'
+      ]);
     } else {
       // 新しい行を追加
       const newRow = [
         dateStr,
         storeName,
-        itemCount,
+        itemNamesStr,
         totalSoldCount,
         totalRevenue
       ];
@@ -274,15 +408,177 @@ function updateDailySalesSummary(spreadsheet, storeName, date, salesData) {
       
       // 数値形式を設定
       const lastRow = dailySalesSheet.getLastRow();
-      dailySalesSheet.getRange(lastRow, itemCountIndex + 1).setNumberFormat('0');
       dailySalesSheet.getRange(lastRow, totalSalesIndex + 1).setNumberFormat('0');
       dailySalesSheet.getRange(lastRow, totalRevenueIndex + 1).setNumberFormat('#,##0');
       
-      logInfo(`  📊 日次売上サマリー追加: ${storeName} (${dateStr}) - 商品数: ${itemCount}, 総販売数: ${totalSoldCount}, 総売上金額: ¥${totalRevenue.toLocaleString()}`);
+      logInfo(`  📊 日次売上サマリー追加: ${storeName} (${dateStr}) - 商品名: ${itemNamesStr}, その日の販売数: ${totalSoldCount}, その日の売上金額: ¥${totalRevenue.toLocaleString()}`);
+      
+      // 変更履歴に記録
+      historySheet.appendRow([
+        new Date(),
+        dateStr,
+        storeName,
+        itemNamesStr,
+        totalSoldCount,
+        totalRevenue,
+        '新規追加'
+      ]);
     }
     
   } catch (error) {
     logError('日次売上サマリー更新エラー', error);
+  }
+}
+
+/**
+ * 日次売上サマリーをクリア（変更履歴を記録）
+ * @param {Spreadsheet} spreadsheet 在庫管理スプレッドシート
+ * @param {string} targetDate クリアする日付（YYYY-MM-DD形式、省略時は全て）
+ * @param {string} targetStore クリアする店舗（省略時は全て）
+ * @return {Object} クリア結果
+ */
+function clearDailySalesSummary(spreadsheet, targetDate = null, targetStore = null) {
+  try {
+    logInfo('========================================');
+    logInfo('日次売上サマリークリア開始');
+    logInfo('========================================');
+    
+    if (targetDate) {
+      logInfo(`対象日付: ${targetDate}`);
+    } else {
+      logInfo('対象日付: 全て');
+    }
+    
+    if (targetStore) {
+      logInfo(`対象店舗: ${targetStore}`);
+    } else {
+      logInfo('対象店舗: 全て');
+    }
+    
+    let dailySalesSheet = spreadsheet.getSheetByName('日次売上サマリー');
+    
+    if (!dailySalesSheet) {
+      logError('日次売上サマリーシートが見つかりません');
+      return { cleared: 0, errors: ['シートが見つかりません'] };
+    }
+    
+    // 変更履歴シートを取得または作成
+    let historySheet = spreadsheet.getSheetByName('日次売上サマリー変更履歴');
+    if (!historySheet) {
+      historySheet = spreadsheet.insertSheet('日次売上サマリー変更履歴');
+      const historyHeaders = ['変更日時', '日付', '店舗', '商品名', 'クリア前の販売数', 'クリア前の売上金額', '操作'];
+      historySheet.getRange(1, 1, 1, historyHeaders.length).setValues([historyHeaders]);
+      historySheet.getRange(1, 1, 1, historyHeaders.length).setFontWeight('bold');
+      historySheet.setFrozenRows(1);
+      historySheet.setColumnWidth(1, 180); // 変更日時
+      historySheet.setColumnWidth(3, 150); // 店舗
+      historySheet.setColumnWidth(4, 300); // 商品名
+    }
+    
+    // 既存データを取得
+    const data = dailySalesSheet.getDataRange().getValues();
+    if (data.length <= 1) {
+      logInfo('クリア対象のデータがありません');
+      return { cleared: 0, errors: [] };
+    }
+    
+    const headers = data[0];
+    const dateIndex = headers.indexOf('日付');
+    const storeIndex = headers.indexOf('店舗');
+    const itemNameIndex = headers.indexOf('商品名');
+    const totalSalesIndex = headers.indexOf('その日の販売数') >= 0 ? headers.indexOf('その日の販売数') : headers.indexOf('総販売数');
+    const totalRevenueIndex = headers.indexOf('その日の売上金額') >= 0 ? headers.indexOf('その日の売上金額') : headers.indexOf('総売上金額');
+    
+    if (dateIndex === -1 || storeIndex === -1 || itemNameIndex === -1 || 
+        totalSalesIndex === -1 || totalRevenueIndex === -1) {
+      logError('日次売上サマリーシートのヘッダーが不正です');
+      return { cleared: 0, errors: ['ヘッダーが不正です'] };
+    }
+    
+    let clearedCount = 0;
+    const now = new Date();
+    
+    // 2行目からデータを処理（1行目はヘッダー）
+    for (let i = data.length - 1; i >= 1; i--) {
+      const row = data[i];
+      const rowDate = row[dateIndex];
+      const rowStore = row[storeIndex];
+      const rowItemNames = row[itemNameIndex] || '';
+      const rowSales = row[totalSalesIndex] || 0;
+      const rowRevenue = row[totalRevenueIndex] || 0;
+      
+      // 日付の比較
+      let rowDateStr = '';
+      if (rowDate instanceof Date) {
+        rowDateStr = Utilities.formatDate(rowDate, 'Asia/Tokyo', 'yyyy-MM-dd');
+      } else if (typeof rowDate === 'string') {
+        rowDateStr = rowDate.trim();
+        if (rowDateStr.includes('/')) {
+          const dateObj = new Date(rowDateStr);
+          if (!isNaN(dateObj.getTime())) {
+            rowDateStr = Utilities.formatDate(dateObj, 'Asia/Tokyo', 'yyyy-MM-dd');
+          }
+        }
+      }
+      
+      // フィルタ条件チェック
+      if (targetDate && rowDateStr !== targetDate) {
+        continue;
+      }
+      if (targetStore && rowStore !== targetStore) {
+        continue;
+      }
+      
+      // 変更履歴に記録
+      historySheet.appendRow([
+        now,
+        rowDateStr,
+        rowStore,
+        rowItemNames,
+        rowSales,
+        rowRevenue,
+        'クリア'
+      ]);
+      
+      // 行を削除
+      dailySalesSheet.deleteRow(i + 1);
+      clearedCount++;
+      
+      logInfo(`クリア: ${rowDateStr} ${rowStore} - 商品名: ${rowItemNames}, 販売数: ${rowSales}, 売上金額: ${rowRevenue}`);
+    }
+    
+    logInfo('========================================');
+    logInfo(`✅ 日次売上サマリーをクリアしました`);
+    logInfo(`クリア件数: ${clearedCount}行`);
+    logInfo(`変更履歴シートに記録しました`);
+    logInfo('========================================');
+    
+    return { cleared: clearedCount, errors: [] };
+    
+  } catch (error) {
+    logError('日次売上サマリークリアエラー', error);
+    return { cleared: 0, errors: [error.message] };
+  }
+}
+
+/**
+ * 日次売上サマリーを全てクリア（手動実行用）
+ */
+function clearAllDailySalesSummary() {
+  try {
+    const spreadsheet = getStockManagementSpreadsheet();
+    if (!spreadsheet) {
+      logError('在庫管理スプレッドシートを取得できませんでした');
+      return;
+    }
+    
+    const result = clearDailySalesSummary(spreadsheet);
+    logInfo(`クリア完了: ${result.cleared}行`);
+    
+    return result;
+  } catch (error) {
+    logError('日次売上サマリー全クリアエラー', error);
+    throw error;
   }
 }
 

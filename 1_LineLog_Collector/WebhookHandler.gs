@@ -140,60 +140,96 @@ function handleMessageEvent(payload) {
         messageText = `[${messageType}]`;
     }
     
-    // スプレッドシートに保存
-    const spreadsheet = getMasterSpreadsheet();
-    const sheet = spreadsheet.getSheetByName('メッセージ一覧');
-    
-    if (!sheet) {
-      throw new Error('メッセージ一覧シートが見つかりません');
-    }
-    
     // 送信者情報を取得
     const senderName = source.userName || source.accountId || source.userId || 'Unknown';
     
     // 1:1チャットかグループチャットかを判定
     let chatType = '';
     let channelName = '';
+    const channelId = source.channelId || '';
     
-    if (source.channelId) {
+    if (channelId) {
       // グループチャット（トークルーム）
       chatType = 'group';
-      channelName = source.channelName || source.channelId;
+      channelName = source.channelName || channelId;
     } else {
       // 1:1チャット（個人メッセージ）
       chatType = 'direct';
       channelName = `[個人チャット] ${senderName}`;
     }
     
-    // メッセージデータを整形
-    const row = [
-      new Date(),  // 日時
-      senderName,  // 送信者
-      channelName,  // ルーム名（または「[個人チャット] ユーザー名」）
-      messageText,  // メッセージ
-      attachmentInfo,  // 添付
-      content.messageId || payload.messageId || '',  // メッセージID
-      source.channelId || source.userId || '',  // チャンネルID（または個人チャットのユーザーID）
-      extractKeywords(messageText),  // キーワード
-      categorizeMessage(messageText),  // カテゴリ
-      `LINE WORKS (Webhook - ${chatType})`  // データソース
-    ];
+    // 在庫管理専用チャンネルかどうかを判定
+    const isStockChannel = CONFIG.STOCK_MANAGEMENT && 
+                          CONFIG.STOCK_MANAGEMENT.STOCK_CHAT_LOG && 
+                          CONFIG.STOCK_MANAGEMENT.STOCK_CHAT_LOG.ENABLED &&
+                          channelId === CONFIG.STOCK_MANAGEMENT.STOCK_CHAT_LOG.CHANNEL_ID;
     
-    // データを追加（最新が上）
-    sheet.insertRowAfter(1);
-    sheet.getRange(2, 1, 1, row.length).setValues([row]);
-    
-    const chatTypeLabel = chatType === 'direct' ? '個人チャット' : 'グループチャット';
-    logInfo(`✅ メッセージを保存 [${chatTypeLabel}]: ${senderName} - ${messageText.substring(0, 50)}`);
+    if (isStockChannel) {
+      // 在庫管理専用チャンネルの場合は専用スプレッドシートに保存
+      const stockSpreadsheet = getStockChatLogSpreadsheet();
+      if (stockSpreadsheet) {
+        const stockSheet = stockSpreadsheet.getSheetByName(CONFIG.STOCK_MANAGEMENT.STOCK_CHAT_LOG.SHEET_NAME);
+        if (stockSheet) {
+          const row = [
+            new Date(),  // 日時
+            senderName,  // 送信者
+            channelName,  // ルーム名
+            messageText,  // メッセージ
+            attachmentInfo,  // 添付
+            content.messageId || payload.messageId || '',  // メッセージID
+            channelId,  // チャンネルID
+            extractKeywords(messageText),  // キーワード
+            categorizeMessage(messageText),  // カテゴリ
+            ''  // 処理済みフラグ（空=未処理）
+          ];
+          
+          stockSheet.insertRowAfter(1);
+          stockSheet.getRange(2, 1, 1, row.length).setValues([row]);
+          
+          logInfo(`✅ 在庫管理専用チャットログに保存: ${senderName} - ${messageText.substring(0, 50)}`);
+        }
+      }
+    } else {
+      // 通常のチャットログはマスタースプレッドシートに保存
+      const spreadsheet = getMasterSpreadsheet();
+      const sheet = spreadsheet.getSheetByName('メッセージ一覧');
+      
+      if (!sheet) {
+        throw new Error('メッセージ一覧シートが見つかりません');
+      }
+      
+      // メッセージデータを整形
+      const row = [
+        new Date(),  // 日時
+        senderName,  // 送信者
+        channelName,  // ルーム名（または「[個人チャット] ユーザー名」）
+        messageText,  // メッセージ
+        attachmentInfo,  // 添付
+        content.messageId || payload.messageId || '',  // メッセージID
+        channelId || source.userId || '',  // チャンネルID（または個人チャットのユーザーID）
+        extractKeywords(messageText),  // キーワード
+        categorizeMessage(messageText),  // カテゴリ
+        `LINE WORKS (Webhook - ${chatType})`  // データソース
+      ];
+      
+      // データを追加（最新が上）
+      sheet.insertRowAfter(1);
+      sheet.getRange(2, 1, 1, row.length).setValues([row]);
+      
+      const chatTypeLabel = chatType === 'direct' ? '個人チャット' : 'グループチャット';
+      logInfo(`✅ メッセージを保存 [${chatTypeLabel}]: ${senderName} - ${messageText.substring(0, 50)}`);
+    }
     
     // 在庫管理システム連携: チャットから在庫補充・売上を検知
-    try {
-      if (typeof updateStockFromChatMessage === 'function') {
-        updateStockFromChatMessage(messageText, senderName, new Date());
-      }
-    } catch (stockError) {
-      logError('在庫連携処理エラー', stockError);
-    }
+    // 注意: チャットログからの在庫更新は無効化されています
+    // スタッフからの在庫情報は専用チャンネル（7d6b452d-2dce-09ac-7663-a2f47d622e91）に手動で入力してください
+    // try {
+    //   if (typeof updateStockFromChatMessage === 'function') {
+    //     updateStockFromChatMessage(messageText, senderName, new Date());
+    //   }
+    // } catch (stockError) {
+    //   logError('在庫連携処理エラー', stockError);
+    // }
     
     // 添付ファイルがあればダウンロード
     if (content.type === 'image' || content.type === 'file') {
