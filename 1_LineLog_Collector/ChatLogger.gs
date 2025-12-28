@@ -49,6 +49,13 @@ function getStockChatLogSpreadsheet() {
   
   if (file) {
     spreadsheet = SpreadsheetApp.open(file);
+    // 既存スプレッドシートの日時列の数値形式を確認・更新
+    const sheet = spreadsheet.getSheetByName(CONFIG.STOCK_MANAGEMENT.STOCK_CHAT_LOG.SHEET_NAME);
+    if (sheet) {
+      const dateTimeFormat = 'yyyy/MM/dd HH:mm:ss';
+      // A列全体の数値形式を設定（既存データも含む）
+      sheet.getRange('A:A').setNumberFormat(dateTimeFormat);
+    }
   } else {
     spreadsheet = SpreadsheetApp.create(fileName);
     DriveApp.getFileById(spreadsheet.getId()).moveTo(folder);
@@ -75,6 +82,10 @@ function initializeStockChatLogSpreadsheet(spreadsheet) {
   messageSheet.getRange('A1:J1').setFontWeight('bold');
   messageSheet.getRange('A1:J1').setBackground('#4285f4');
   messageSheet.getRange('A1:J1').setFontColor('#ffffff');
+  
+  // 日時列（A列）の数値形式を設定（日付+時刻を表示）
+  const dateTimeFormat = 'yyyy/MM/dd HH:mm:ss';
+  messageSheet.getRange('A:A').setNumberFormat(dateTimeFormat);
   
   // スプレッドシート全体の設定
   spreadsheet.setSpreadsheetTimeZone('Asia/Tokyo');
@@ -156,6 +167,10 @@ function saveStockChatMessagesToSpreadsheet(channel, messages) {
     // 既存データの上に挿入
     sheet.insertRowsAfter(1, rows.length);
     sheet.getRange(2, 1, rows.length, 10).setValues(rows);
+    
+    // 日時列の数値形式を設定（日付+時刻を表示）
+    const dateTimeFormat = 'yyyy/MM/dd HH:mm:ss';
+    sheet.getRange(2, 1, rows.length, 1).setNumberFormat(dateTimeFormat);
     
     logInfo(`在庫管理専用チャットログに${rows.length}件のメッセージを保存`);
   }

@@ -195,7 +195,7 @@ function saveAuditMessagesToSpreadsheet(spreadsheet, userId, messages) {
       msg.attachments ? msg.attachments.length + '件' : '',  // 添付ファイル
       msg.messageId || msg.logId || '',  // メッセージID
       msg.channelId || userId,  // チャンネルID
-      extractKeywords(msg.content || msg.text || ''),  // キーワード
+      extractKeywords(msg.content || msg.text || '').join(', '),  // キーワード
       categorizeMessage(msg.content || msg.text || ''),  // カテゴリ
       ''  // URL
     ];

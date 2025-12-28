@@ -464,6 +464,105 @@ function logProgress(current, total, label = '処理中') {
   logInfo(`${label}: ${current}/${total} (${percentage}%)`);
 }
 
+// ==================== Gemini最適化機能 ====================
+
+/**
+ * メッセージからキーワードを抽出
+ * @param {string} text メッセージテキスト
+ * @return {Array<string>} キーワードの配列
+ */
+function extractKeywords(text) {
+  if (!text || typeof text !== 'string') {
+    return [];
+  }
+  
+  // 重要キーワードのリスト
+  const importantKeywords = [
+    '会議', 'ミーティング', '打ち合わせ',
+    '休暇', '休み', '有給', '欠勤',
+    '報告', '完了', '結果', '状況',
+    '決定', '承認', '確定', '決まり',
+    '問題', 'エラー', 'トラブル', '困っ',
+    '依頼', 'お願い', 'してほしい',
+    '確認', '質問', '教えて',
+    '入荷', '納品', '補充', '在庫',
+    '売上', '販売', '注文',
+    'みどりの大地', '四季彩', '尾平', 'エーコープ', 'Aコープ',
+    'じゃがいも', '白ねぎ', 'サツマイモ', '野菜', '農産物'
+  ];
+  
+  const foundKeywords = [];
+  
+  importantKeywords.forEach(keyword => {
+    if (text.includes(keyword)) {
+      foundKeywords.push(keyword);
+    }
+  });
+  
+  // 最大10個まで
+  return foundKeywords.slice(0, 10);
+}
+
+/**
+ * メッセージをカテゴリに分類
+ * @param {string} text メッセージテキスト
+ * @return {string} カテゴリ名
+ */
+function categorizeMessage(text) {
+  if (!text || typeof text !== 'string') {
+    return 'その他';
+  }
+  
+  const lowerText = text.toLowerCase();
+  
+  // 在庫関連
+  if (text.includes('入荷') || text.includes('納品') || text.includes('補充') || text.includes('在庫')) {
+    return '在庫補充';
+  }
+  
+  if (text.includes('売上') || text.includes('販売') || text.includes('注文')) {
+    return '売上';
+  }
+  
+  // 会議関連
+  if (text.includes('会議') || text.includes('ミーティング') || text.includes('打ち合わせ')) {
+    return '会議';
+  }
+  
+  // 休暇関連
+  if (text.includes('休暇') || text.includes('休み') || text.includes('有給') || text.includes('欠勤')) {
+    return '休暇連絡';
+  }
+  
+  // 報告関連
+  if (text.includes('報告') || text.includes('完了') || text.includes('結果') || text.includes('状況')) {
+    return '報告';
+  }
+  
+  // 質問関連
+  if (text.includes('質問') || text.includes('教えて') || text.includes('どうすれば') || text.includes('？') || text.includes('?')) {
+    return '質問';
+  }
+  
+  // 決定事項
+  if (text.includes('決定') || text.includes('決まり') || text.includes('承認') || text.includes('確定')) {
+    return '決定事項';
+  }
+  
+  // 問題関連
+  if (text.includes('問題') || text.includes('エラー') || text.includes('トラブル') || text.includes('困っ')) {
+    return '問題';
+  }
+  
+  // 依頼関連
+  if (text.includes('依頼') || text.includes('お願い') || text.includes('してほしい')) {
+    return '依頼';
+  }
+  
+  // デフォルト
+  return 'その他';
+}
+
 
 
 

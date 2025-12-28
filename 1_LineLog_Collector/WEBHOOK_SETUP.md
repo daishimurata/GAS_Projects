@@ -8,18 +8,31 @@ LINE WORKSのBotを使って、トークルームのメッセージをリアル�
 
 ## ⚙️ セットアップ手順
 
-### ステップ1: Webhook URLを取得
+### ステップ1: Webhook設定状況を確認
 
 Apps Scriptエディタで以下を実行：
 
 ```javascript
-showWebhookSetupGuide()
+checkWebhookStatus()
+```
+
+この関数は以下を確認します：
+- Web Appのデプロイ状況
+- Bot ID/Secretの設定状況
+- 在庫管理専用チャットログの設定状況
+
+### ステップ2: Webhook URLを取得
+
+Web Appがデプロイ済みの場合、以下を実行：
+
+```javascript
+getWebhookUrl()
 ```
 
 または：
 
 ```javascript
-ScriptApp.getService().getUrl()
+showWebhookSetupGuide()
 ```
 
 実行ログに表示されたURLをコピーしてください。
@@ -29,9 +42,11 @@ ScriptApp.getService().getUrl()
 https://script.google.com/macros/s/XXXXXXXXXXXXXXXXXXXX/exec
 ```
 
+**⚠️ 注意**: Web Appがデプロイされていない場合は、次のステップでデプロイしてください。
+
 ---
 
-### ステップ2: Web Appとしてデプロイ（初回のみ）
+### ステップ3: Web Appとしてデプロイ（初回のみ）
 
 **重要**: Webhookを有効にするには、プロジェクトを「Web App」としてデプロイする必要があります。
 
@@ -46,7 +61,7 @@ https://script.google.com/macros/s/XXXXXXXXXXXXXXXXXXXX/exec
 
 ---
 
-### ステップ3: LINE WORKS Developer Console設定
+### ステップ4: LINE WORKS Developer Console設定
 
 1. **LINE WORKS Developer Consoleにアクセス**
    ```
@@ -70,7 +85,9 @@ https://script.google.com/macros/s/XXXXXXXXXXXXXXXXXXXX/exec
 
 ---
 
-### ステップ4: Botをトークルームに追加
+### ステップ5: Botをトークルームに追加
+
+#### 通常のチャットログ用（マスターログ）
 
 1. **LINE WORKSアプリを開く**
 
@@ -81,20 +98,38 @@ https://script.google.com/macros/s/XXXXXXXXXXXXXXXXXXXX/exec
 
 4. **Bot「日向」を検索して追加**
 
+#### 在庫管理専用チャンネル
+
+1. **在庫管理専用チャンネルを開く**
+   - チャンネルID: `7d6b452d-2dce-09ac-7663-a2f47d622e91`
+
+2. **メニュー → メンバー追加**
+
+3. **Bot「日向」を検索して追加**
+
+**💡 重要**: 在庫管理専用チャンネルのメッセージは、専用のスプレッドシート「在庫管理チャットログ」に保存されます。
+
 ---
 
-### ステップ5: 動作確認
+### ステップ6: 動作確認
 
 #### テスト1: Apps Scriptでテスト
 
+**通常のチャットログ:**
 ```javascript
 testWebhook()
+```
+
+**在庫管理専用チャンネル:**
+```javascript
+testWebhookStockChannel()
 ```
 
 実行して、スプレッドシートに「テストメッセージ」が追加されることを確認。
 
 #### テスト2: 実際のメッセージで確認
 
+**通常のチャットログ:**
 1. LINE WORKSの「日报」トークルームでメッセージを送信：
    ```
    テスト: Webhook動作確認
@@ -105,10 +140,25 @@ testWebhook()
    - シート: 「メッセージ一覧」
    - 最新行にメッセージが追加されているはず
 
+**在庫管理専用チャンネル:**
+1. LINE WORKSの在庫管理専用チャンネルでメッセージを送信：
+   ```
+   みどりの大地にじゃがいも10個入荷しました
+   ```
+
+2. **Google Sheetsを確認**
+   - 場所: `マイドライブ/LINE WORKS統合ログ/チャットログ/在庫管理チャットログ`
+   - シート: 「メッセージ一覧」
+   - 最新行にメッセージが追加されているはず
+
 3. **Apps Scriptの実行ログを確認**
    ```
-   ✅ メッセージを保存: XXX - テスト: Webhook動作確認
+   ✅ 在庫管理専用チャットログに保存: XXX - みどりの大地にじゃがいも10個入荷しました
    ```
+
+4. **在庫管理システムに反映**
+   - `2_Stock_Manager`プロジェクトで `testAnalyzeStockChatLog()` を実行
+   - メッセージを解析して在庫管理システムに反映
 
 ---
 
@@ -118,9 +168,14 @@ testWebhook()
 
 ✅ **リアルタイム保存**
 - 「日报」トークルームのメッセージが自動的にGoogle Sheetsに保存
+- 在庫管理専用チャンネルのメッセージも専用スプレッドシートに自動保存
 
 ✅ **全メッセージタイプに対応**
 - テキスト、画像、ファイル、スタンプ、位置情報
+
+✅ **自動分類**
+- 在庫管理専用チャンネルのメッセージは自動的に専用スプレッドシートに保存
+- 通常のチャットはマスターログに保存
 
 ✅ **Vercel不要**
 - GAS単体で動作（Vercelはバックアップとして継続可能）

@@ -553,12 +553,128 @@ function initializeStockChatLogSpreadsheet(spreadsheet) {
  * @param {Map} stockMap 在庫マスタマップ
  * @return {Object|null} 更新結果
  */
+/**
+ * 在庫状況と補充数量を抽出
+ * @param {string} messageText メッセージテキスト
+ * @param {string} itemName 商品名
+ * @return {Object} {status: 'shortage'|'unknown'|'supplement'|'normal', quantity: number}
+ */
+function extractStockStatusAndQuantity(messageText, itemName) {
+  const text = messageText.toLowerCase();
+  const escapedName = itemName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  
+  // 在庫不足のキーワード
+  const shortageKeywords = ['足りない', '足りなくなった', '不足', '切れた', 'なくなった', '無くなった'];
+  
+  // 在庫不明のキーワード
+  const unknownKeywords = ['いくつあるかわからない', 'いくつかわからない', '不明', '確認したい', '確認して', '数がわからない', '数不明'];
+  
+  // 補充・追加のキーワード
+  const supplementKeywords = ['追加', '入荷', '補充', '納品', '置きました', '納入', '搬入', '入れた', '入れたよ'];
+  
+  // 在庫不足の判定
+  const hasShortage = shortageKeywords.some(kw => text.includes(kw));
+  const hasUnknown = unknownKeywords.some(kw => text.includes(kw));
+  
+  // まず数量を抽出（「いくつあるかわからない」があっても数量が記載されている場合は抽出）
+  let quantity = 0;
+  
+  // パターン1: 商品名の後に数字＋単位（追加・入荷・補充などのキーワード付き）
+  const supplementPattern1 = new RegExp(
+    escapedName + '[\\s\\S]{0,50}?(\\d+)\\s*(点|個|袋|束|本|パック|ヶ|箱|ケース)\\s*(追加|入荷|補充|納品|置きました|納入|搬入|入れた)',
+    'i'
+  );
+  const match1 = messageText.match(supplementPattern1);
+  if (match1) {
+    quantity = parseInt(match1[1], 10);
+    // 「いくつあるかわからない」があっても数量が記載されている場合は補充として扱う
+    return { status: 'supplement', quantity: quantity };
+  }
+  
+  // パターン2: 追加・入荷・補充などのキーワードの後に数字＋単位＋商品名
+  const supplementPattern2 = new RegExp(
+    '(追加|入荷|補充|納品|置きました|納入|搬入|入れた)[\\s\\S]{0,50}?(\\d+)\\s*(点|個|袋|束|本|パック|ヶ|箱|ケース)[\\s\\S]{0,50}?' + escapedName,
+    'i'
+  );
+  const match2 = messageText.match(supplementPattern2);
+  if (match2) {
+    quantity = parseInt(match2[2], 10);
+    // 「いくつあるかわからない」があっても数量が記載されている場合は補充として扱う
+    return { status: 'supplement', quantity: quantity };
+  }
+  
+  // パターン3: 「いくつあるかわからない」+ 数量のパターン
+  // 「いくつあるかわからないが○個追加した」のような場合
+  const unknownWithQuantityPattern = new RegExp(
+    '(いくつあるかわからない|いくつかわからない|数がわからない)[\\s\\S]{0,50}?(\\d+)\\s*(点|個|袋|束|本|パック|ヶ|箱|ケース)[\\s\\S]{0,50}?' + escapedName,
+    'i'
+  );
+  const match3 = messageText.match(unknownWithQuantityPattern);
+  if (match3) {
+    quantity = parseInt(match3[2], 10);
+    // 「いくつあるかわからない」があっても数量が記載されている場合は補充として扱う
+    return { status: 'supplement', quantity: quantity };
+  }
+  
+  // パターン4: 商品名の後に数字＋単位（一般的なパターン）
+  const generalPattern = new RegExp(
+    escapedName + '[\\s\\S]{0,50}?(\\d+)\\s*(点|個|袋|束|本|パック|ヶ|箱|ケース)',
+    'i'
+  );
+  const match4 = messageText.match(generalPattern);
+  if (match4) {
+    quantity = parseInt(match4[1], 10);
+    // 補充キーワードがある場合は補充、そうでなければ通常の数量
+    const hasSupplementKeyword = supplementKeywords.some(kw => messageText.includes(kw));
+    // 「いくつあるかわからない」があっても数量が記載されている場合は補充として扱う
+    if (hasUnknown && quantity > 0) {
+      return { status: 'supplement', quantity: quantity };
+    }
+    return { 
+      status: hasSupplementKeyword ? 'supplement' : 'normal', 
+      quantity: quantity 
+    };
+  }
+  
+  // パターン5: 「いくつあるかわからない」+ 数量（逆順）
+  // 「○個追加したけどいくつあるかわからない」のような場合
+  const quantityWithUnknownPattern = new RegExp(
+    '(\\d+)\\s*(点|個|袋|束|本|パック|ヶ|箱|ケース)[\\s\\S]{0,50}?(いくつあるかわからない|いくつかわからない|数がわからない)[\\s\\S]{0,50}?' + escapedName,
+    'i'
+  );
+  const match5 = messageText.match(quantityWithUnknownPattern);
+  if (match5) {
+    quantity = parseInt(match5[1], 10);
+    // 「いくつあるかわからない」があっても数量が記載されている場合は補充として扱う
+    return { status: 'supplement', quantity: quantity };
+  }
+  
+  // 在庫不足の判定（数量が抽出できなかった場合）
+  if (hasShortage) {
+    return { 
+      status: 'shortage', 
+      quantity: 0 
+    };
+  }
+  
+  // 在庫不明の判定（数量が抽出できなかった場合）
+  if (hasUnknown) {
+    return { 
+      status: 'unknown', 
+      quantity: 0 
+    };
+  }
+  
+  // デフォルト
+  return { status: 'normal', quantity: 0 };
+}
+
 function processStockChatMessage(messageText, senderName, date, spreadsheet, stockSheet, logSheet, stockMap) {
   try {
     logInfo(`[DEBUG] 在庫管理チャットメッセージ処理開始: "${messageText}"`);
     
     // キーワードチェック（出荷・持っていった等を追加）
-    const keywords = ['入荷', '補充', '納品', '置きました', '追加', '出荷', '持っていった', '納入', '搬入'];
+    const keywords = ['入荷', '補充', '納品', '置きました', '追加', '出荷', '持っていった', '納入', '搬入', '足りない', '足りなくなった', 'いくつあるかわからない', '不明'];
     const hasKeyword = keywords.some(kw => messageText.includes(kw));
     
     // 店舗判定
@@ -608,15 +724,37 @@ function processStockChatMessage(messageText, senderName, date, spreadsheet, sto
         if (matchedName) {
           if (processedItems.has(itemName)) return;
           
-          // 数量を抽出 (マッチした単語を使用)
-          const count = extractSoldCount(messageText, matchedName);
-          logInfo(`[DEBUG] 商品検知: ${itemName} (KW:${matchedName}), 数量: ${count}`);
+          // 在庫状況と数量を抽出
+          const stockInfo_extracted = extractStockStatusAndQuantity(messageText, matchedName);
+          logInfo(`[DEBUG] 商品検知: ${itemName} (KW:${matchedName}), 状況: ${stockInfo_extracted.status}, 数量: ${stockInfo_extracted.quantity}`);
           
-          if (count > 0) {
-            const currentStock = parseInt(stockInfo.currentStock, 10) || 0;
-            
-            // 出荷 = 在庫増
-            const newStock = currentStock + count;
+          const currentStock = parseInt(stockInfo.currentStock, 10) || 0;
+          let newStock = currentStock;
+          let updateStock = false;
+          let logMessage = '';
+          
+          // 状況に応じて処理
+          if (stockInfo_extracted.status === 'supplement' && stockInfo_extracted.quantity > 0) {
+            // 補充: 在庫を増やす
+            newStock = currentStock + stockInfo_extracted.quantity;
+            updateStock = true;
+            logMessage = `補充: +${stockInfo_extracted.quantity}個`;
+          } else if (stockInfo_extracted.status === 'shortage') {
+            // 在庫不足: ログに記録するが在庫は変更しない
+            updateStock = false;
+            logMessage = `在庫不足の報告（在庫: ${currentStock}個）`;
+          } else if (stockInfo_extracted.status === 'unknown') {
+            // 在庫不明: ログに記録するが在庫は変更しない
+            updateStock = false;
+            logMessage = `在庫数不明の報告（現在庫: ${currentStock}個）`;
+          } else if (stockInfo_extracted.quantity > 0) {
+            // 通常の数量指定: 補充として扱う
+            newStock = currentStock + stockInfo_extracted.quantity;
+            updateStock = true;
+            logMessage = `補充: +${stockInfo_extracted.quantity}個`;
+          }
+          
+          if (updateStock || stockInfo_extracted.status === 'shortage' || stockInfo_extracted.status === 'unknown') {
             
             // ヘッダーから列インデックスを動的に取得
             const headers = stockSheet.getRange(1, 1, 1, stockSheet.getLastColumn()).getValues()[0];
@@ -624,41 +762,58 @@ function processStockChatMessage(messageText, senderName, date, spreadsheet, sto
                                   (headers.indexOf('在庫数') >= 0 ? headers.indexOf('在庫数') + 1 : 4));
             const lastUpdateColIndex = headers.indexOf('最終更新日時') >= 0 ? headers.indexOf('最終更新日時') + 1 : 6;
             
-            // シート更新
-            stockSheet.getRange(stockInfo.rowIndex, stockColIndex).setValue(newStock);
-            stockSheet.getRange(stockInfo.rowIndex, lastUpdateColIndex).setValue(new Date());
+            // 在庫を更新する場合のみシート更新
+            if (updateStock) {
+              stockSheet.getRange(stockInfo.rowIndex, stockColIndex).setValue(newStock);
+              stockSheet.getRange(stockInfo.rowIndex, lastUpdateColIndex).setValue(new Date());
+            }
             
             // ログ記録
             const logHeaders = logSheet.getRange(1, 1, 1, logSheet.getLastColumn()).getValues()[0];
             const hasUnitPrice = logHeaders.includes('単価');
             const hasSalesAmount = logHeaders.includes('売上金額');
             
+            // 販売数・単価・売上金額の設定
+            let salesCount = '';
+            let unitPrice = 0;
+            let salesAmount = 0;
+            
+            if (stockInfo_extracted.status === 'supplement' && stockInfo_extracted.quantity > 0) {
+              salesCount = `+${stockInfo_extracted.quantity}`;
+            } else if (stockInfo_extracted.status === 'shortage') {
+              salesCount = '在庫不足';
+            } else if (stockInfo_extracted.status === 'unknown') {
+              salesCount = '在庫不明';
+            } else {
+              salesCount = `+${stockInfo_extracted.quantity}`;
+            }
+            
             if (hasUnitPrice && hasSalesAmount) {
               logSheet.appendRow([
                 date,
                 storeName,
                 itemName,
-                `+${count}`,
-                0, // 単価（補充時は0）
-                0, // 売上金額（補充時は0）
-                newStock,
-                `チャット報告: ${senderName}`
+                salesCount,
+                unitPrice, // 単価（補充・報告時は0）
+                salesAmount, // 売上金額（補充・報告時は0）
+                updateStock ? newStock : currentStock,
+                `チャット報告: ${senderName} - ${logMessage}`
               ]);
             } else {
               logSheet.appendRow([
                 date,
                 storeName,
                 itemName,
-                `+${count}`,
-                newStock,
-                `チャット報告: ${senderName}`
+                salesCount,
+                updateStock ? newStock : currentStock,
+                `チャット報告: ${senderName} - ${logMessage}`
               ]);
             }
             
             updated = true;
-            resultMessage = `${itemName} +${count} (在庫: ${newStock})`;
+            resultMessage = `${itemName} ${logMessage} (在庫: ${updateStock ? newStock : currentStock})`;
             processedItems.add(itemName);
-            logInfo(`📦 在庫管理チャット更新: ${storeName} ${itemName} +${count}`);
+            logInfo(`📦 在庫管理チャット更新: ${storeName} ${itemName} ${logMessage}`);
           }
         }
       }

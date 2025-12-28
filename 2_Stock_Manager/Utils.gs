@@ -199,13 +199,42 @@ function updateDailySalesSummary(spreadsheet, storeName, date, salesData) {
     let historySheet = spreadsheet.getSheetByName('日次売上サマリー変更履歴');
     if (!historySheet) {
       historySheet = spreadsheet.insertSheet('日次売上サマリー変更履歴');
-      const historyHeaders = ['変更日時', '日付', '店舗', '商品名', '追加した販売数', '追加した売上金額', '操作'];
+      const historyHeaders = ['変更日時', '日付', '店舗', '商品名', '単価', '販売数', '売上金額', '操作'];
       historySheet.getRange(1, 1, 1, historyHeaders.length).setValues([historyHeaders]);
       historySheet.getRange(1, 1, 1, historyHeaders.length).setFontWeight('bold');
       historySheet.setFrozenRows(1);
       historySheet.setColumnWidth(1, 180); // 変更日時
       historySheet.setColumnWidth(3, 150); // 店舗
       historySheet.setColumnWidth(4, 300); // 商品名
+      historySheet.setColumnWidth(5, 80);  // 単価
+      historySheet.setColumnWidth(6, 80);  // 販売数
+      historySheet.setColumnWidth(7, 100); // 売上金額
+    } else {
+      // 既存のヘッダーを確認して、必要に応じて更新
+      const existingHeaders = historySheet.getRange(1, 1, 1, historySheet.getLastColumn()).getValues()[0];
+      const expectedHeaders = ['変更日時', '日付', '店舗', '商品名', '単価', '販売数', '売上金額', '操作'];
+      
+      // ヘッダーが異なる場合は更新
+      if (existingHeaders.length !== expectedHeaders.length || 
+          !existingHeaders.every((h, i) => h === expectedHeaders[i])) {
+        // 古いヘッダー名を新しいヘッダー名に更新
+        const oldHeaders = ['変更日時', '日付', '店舗', '商品名', '追加した販売数', '追加した売上金額', '操作'];
+        const newHeaders = ['変更日時', '日付', '店舗', '商品名', '単価', '販売数', '売上金額', '操作'];
+        
+        // 列を追加または更新
+        if (existingHeaders.length < expectedHeaders.length) {
+          // 列を追加
+          historySheet.insertColumnAfter(4); // 商品名の後に単価列を追加
+          historySheet.getRange(1, 5).setValue('単価');
+          historySheet.getRange(1, 5).setFontWeight('bold');
+          historySheet.setColumnWidth(5, 80);
+        }
+        
+        // ヘッダーを更新
+        historySheet.getRange(1, 1, 1, expectedHeaders.length).setValues([expectedHeaders]);
+        historySheet.getRange(1, 1, 1, expectedHeaders.length).setFontWeight('bold');
+        logInfo('変更履歴シートのヘッダーを更新しました');
+      }
     }
     
     // 日付を YYYY-MM-DD 形式に変換
@@ -385,15 +414,38 @@ function updateDailySalesSummary(spreadsheet, storeName, date, salesData) {
       logInfo(`  📊 日次売上サマリー更新: ${storeName} (${dateStr}) - 商品名: ${newItemNamesStr}, その日の販売数: ${currentTotalSales} → ${newTotalSales}, その日の売上金額: ¥${currentTotalRevenue.toLocaleString()} → ¥${newTotalRevenue.toLocaleString()}`);
       
       // 変更履歴に記録
-      historySheet.appendRow([
-        new Date(),
-        dateStr,
-        storeName,
-        itemNamesStr,
-        totalSoldCount,
-        totalRevenue,
-        '追加'
-      ]);
+      // 単価を計算（売上金額 / 販売数、0除算を避ける）
+      const unitPrice = totalSoldCount > 0 ? Math.round(totalRevenue / totalSoldCount) : 0;
+      
+      const historyHeaders = historySheet.getRange(1, 1, 1, historySheet.getLastColumn()).getValues()[0];
+      const unitPriceIndex = historyHeaders.indexOf('単価');
+      const salesCountIndex = historyHeaders.indexOf('販売数');
+      const salesAmountIndex = historyHeaders.indexOf('売上金額');
+      
+      if (unitPriceIndex !== -1 && salesCountIndex !== -1 && salesAmountIndex !== -1) {
+        // 新しいヘッダー形式（単価、販売数、売上金額）
+        historySheet.appendRow([
+          new Date(),
+          dateStr,
+          storeName,
+          itemNamesStr,
+          unitPrice,
+          totalSoldCount,
+          totalRevenue,
+          '追加'
+        ]);
+      } else {
+        // 旧形式（後方互換性のため）
+        historySheet.appendRow([
+          new Date(),
+          dateStr,
+          storeName,
+          itemNamesStr,
+          totalSoldCount,
+          totalRevenue,
+          '追加'
+        ]);
+      }
     } else {
       // 新しい行を追加
       const newRow = [
@@ -414,15 +466,38 @@ function updateDailySalesSummary(spreadsheet, storeName, date, salesData) {
       logInfo(`  📊 日次売上サマリー追加: ${storeName} (${dateStr}) - 商品名: ${itemNamesStr}, その日の販売数: ${totalSoldCount}, その日の売上金額: ¥${totalRevenue.toLocaleString()}`);
       
       // 変更履歴に記録
-      historySheet.appendRow([
-        new Date(),
-        dateStr,
-        storeName,
-        itemNamesStr,
-        totalSoldCount,
-        totalRevenue,
-        '新規追加'
-      ]);
+      // 単価を計算（売上金額 / 販売数、0除算を避ける）
+      const unitPrice = totalSoldCount > 0 ? Math.round(totalRevenue / totalSoldCount) : 0;
+      
+      const historyHeaders = historySheet.getRange(1, 1, 1, historySheet.getLastColumn()).getValues()[0];
+      const unitPriceIndex = historyHeaders.indexOf('単価');
+      const salesCountIndex = historyHeaders.indexOf('販売数');
+      const salesAmountIndex = historyHeaders.indexOf('売上金額');
+      
+      if (unitPriceIndex !== -1 && salesCountIndex !== -1 && salesAmountIndex !== -1) {
+        // 新しいヘッダー形式（単価、販売数、売上金額）
+        historySheet.appendRow([
+          new Date(),
+          dateStr,
+          storeName,
+          itemNamesStr,
+          unitPrice,
+          totalSoldCount,
+          totalRevenue,
+          '新規追加'
+        ]);
+      } else {
+        // 旧形式（後方互換性のため）
+        historySheet.appendRow([
+          new Date(),
+          dateStr,
+          storeName,
+          itemNamesStr,
+          totalSoldCount,
+          totalRevenue,
+          '新規追加'
+        ]);
+      }
     }
     
   } catch (error) {
@@ -466,13 +541,52 @@ function clearDailySalesSummary(spreadsheet, targetDate = null, targetStore = nu
     let historySheet = spreadsheet.getSheetByName('日次売上サマリー変更履歴');
     if (!historySheet) {
       historySheet = spreadsheet.insertSheet('日次売上サマリー変更履歴');
-      const historyHeaders = ['変更日時', '日付', '店舗', '商品名', 'クリア前の販売数', 'クリア前の売上金額', '操作'];
+      const historyHeaders = ['変更日時', '日付', '店舗', '商品名', '単価', '販売数', '売上金額', '操作'];
       historySheet.getRange(1, 1, 1, historyHeaders.length).setValues([historyHeaders]);
       historySheet.getRange(1, 1, 1, historyHeaders.length).setFontWeight('bold');
       historySheet.setFrozenRows(1);
       historySheet.setColumnWidth(1, 180); // 変更日時
       historySheet.setColumnWidth(3, 150); // 店舗
       historySheet.setColumnWidth(4, 300); // 商品名
+      historySheet.setColumnWidth(5, 80);  // 単価
+      historySheet.setColumnWidth(6, 80);  // 販売数
+      historySheet.setColumnWidth(7, 100); // 売上金額
+    } else {
+      // 既存のヘッダーを確認して、必要に応じて更新
+      const existingHeaders = historySheet.getRange(1, 1, 1, historySheet.getLastColumn()).getValues()[0];
+      const expectedHeaders = ['変更日時', '日付', '店舗', '商品名', '単価', '販売数', '売上金額', '操作'];
+      
+      // ヘッダーが異なる場合は更新
+      if (existingHeaders.length !== expectedHeaders.length || 
+          !existingHeaders.every((h, i) => h === expectedHeaders[i])) {
+        // 古いヘッダー名を新しいヘッダー名に更新
+        if (existingHeaders.includes('追加した販売数')) {
+          const salesIndex = existingHeaders.indexOf('追加した販売数');
+          historySheet.getRange(1, salesIndex + 1).setValue('販売数');
+        }
+        if (existingHeaders.includes('追加した売上金額')) {
+          const revenueIndex = existingHeaders.indexOf('追加した売上金額');
+          historySheet.getRange(1, revenueIndex + 1).setValue('売上金額');
+        }
+        if (existingHeaders.includes('クリア前の販売数')) {
+          const salesIndex = existingHeaders.indexOf('クリア前の販売数');
+          historySheet.getRange(1, salesIndex + 1).setValue('販売数');
+        }
+        if (existingHeaders.includes('クリア前の売上金額')) {
+          const revenueIndex = existingHeaders.indexOf('クリア前の売上金額');
+          historySheet.getRange(1, revenueIndex + 1).setValue('売上金額');
+        }
+        
+        // 単価列がない場合は追加
+        if (!existingHeaders.includes('単価')) {
+          historySheet.insertColumnAfter(4); // 商品名の後に単価列を追加
+          historySheet.getRange(1, 5).setValue('単価');
+          historySheet.getRange(1, 5).setFontWeight('bold');
+          historySheet.setColumnWidth(5, 80);
+        }
+        
+        logInfo('変更履歴シートのヘッダーを更新しました');
+      }
     }
     
     // 既存データを取得
@@ -530,15 +644,38 @@ function clearDailySalesSummary(spreadsheet, targetDate = null, targetStore = nu
       }
       
       // 変更履歴に記録
-      historySheet.appendRow([
-        now,
-        rowDateStr,
-        rowStore,
-        rowItemNames,
-        rowSales,
-        rowRevenue,
-        'クリア'
-      ]);
+      // 単価を計算（売上金額 / 販売数、0除算を避ける）
+      const unitPrice = rowSales > 0 ? Math.round(rowRevenue / rowSales) : 0;
+      
+      const historyHeaders = historySheet.getRange(1, 1, 1, historySheet.getLastColumn()).getValues()[0];
+      const unitPriceIndex = historyHeaders.indexOf('単価');
+      const salesCountIndex = historyHeaders.indexOf('販売数');
+      const salesAmountIndex = historyHeaders.indexOf('売上金額');
+      
+      if (unitPriceIndex !== -1 && salesCountIndex !== -1 && salesAmountIndex !== -1) {
+        // 新しいヘッダー形式（単価、販売数、売上金額）
+        historySheet.appendRow([
+          now,
+          rowDateStr,
+          rowStore,
+          rowItemNames,
+          unitPrice,
+          rowSales,
+          rowRevenue,
+          'クリア'
+        ]);
+      } else {
+        // 旧形式（後方互換性のため）
+        historySheet.appendRow([
+          now,
+          rowDateStr,
+          rowStore,
+          rowItemNames,
+          rowSales,
+          rowRevenue,
+          'クリア'
+        ]);
+      }
       
       // 行を削除
       dailySalesSheet.deleteRow(i + 1);

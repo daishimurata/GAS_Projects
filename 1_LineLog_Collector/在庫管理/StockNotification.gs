@@ -242,6 +242,11 @@ function sendTestMessagesToStockChannel() {
             
             sheet.insertRowAfter(1);
             sheet.getRange(2, 1, 1, row.length).setValues([row]);
+            
+            // 日時列の数値形式を設定（日付+時刻を表示）
+            const dateTimeFormat = 'yyyy/MM/dd HH:mm:ss';
+            sheet.getRange(2, 1).setNumberFormat(dateTimeFormat);
+            
             logInfo(`  📝 スプレッドシートに保存完了`);
           } catch (error) {
             logError('スプレッドシート保存エラー', error);

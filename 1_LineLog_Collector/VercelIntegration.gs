@@ -38,7 +38,7 @@ function handleVercelWebhook(payload) {
       messageData.content?.attachments ? messageData.content.attachments.length + '件' : '',  // 添付
       messageData.messageId || '',  // メッセージID
       messageData.channelId || '',  // チャンネルID
-      extractKeywords(messageData.content?.text || ''),  // キーワード
+      extractKeywords(messageData.content?.text || '').join(', '),  // キーワード
       categorizeMessage(messageData.content?.text || ''),  // カテゴリ
       payload.source || 'Vercel'  // データソース
     ];
