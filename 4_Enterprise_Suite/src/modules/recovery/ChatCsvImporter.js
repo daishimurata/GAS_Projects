@@ -50,7 +50,8 @@ class ChatCsvImporter {
                 .map(byte => ('0' + (byte & 0xFF).toString(16)).slice(-2)).join('');
 
             // 自動タグ付け（ターゲティング）
-            const enrichment = enricher.analyzeMention(content);
+            // 同期AI解析を無効化（タイムアウト回避のため）。後続のバッチ処理で付与する。
+            // const enrichment = enricher.analyzeMention(content);
 
             return {
                 message_id: messageId,
@@ -61,9 +62,9 @@ class ChatCsvImporter {
                 created_at: createdAt,
                 ingested_at: new Date().toISOString(),
                 // 将来のデータ統合用フィールド
-                mention_user_ids: enrichment.mention_user_ids,
-                is_confirmed: enrichment.is_confirmed,
-                confidence: enrichment.confidence
+                mention_user_ids: [], // enrichment.mention_user_ids,
+                is_confirmed: false, // enrichment.is_confirmed,
+                confidence: 0 // enrichment.confidence
             };
         });
 

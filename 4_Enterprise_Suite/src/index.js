@@ -70,6 +70,28 @@ function doGet(e) {
     }
 
     const props = PropertiesService.getScriptProperties();
+
+    // DBテーブルのセットアップ
+    if (e.parameter.dbsetup === '1') {
+        try {
+            setupAttendanceDB();
+            return ContentService.createTextOutput('✅ Attendance DB Setup Completed');
+        } catch (err) {
+            return ContentService.createTextOutput(`❌ Setup Error: ${err.toString()}`);
+        }
+    }
+
+    // 勤怠関連テーブルのステータス確認 (存在・件数・更新日時)
+    if (e.parameter.dbcheck === '3') {
+        try {
+            const status = getAttendanceTableStatus();
+            return ContentService.createTextOutput(JSON.stringify(status, null, 2))
+                .setMimeType(ContentService.MimeType.JSON);
+        } catch (err) {
+            return ContentService.createTextOutput(`❌ Status Check Error: ${err.toString()}`);
+        }
+    }
+
     const botId = Config.LINEWORKS.BOT_ID;
     const auth = new LineWorksAuth();
 

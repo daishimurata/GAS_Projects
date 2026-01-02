@@ -1,0 +1,11 @@
+{
+  "116-柿内環奈": {
+    "certificate_data": {
+      "recipient_id": "0000009670",
+      "expiry_date": "2025-06-30",
+      "municipality": "鈴鹿市",
+      "determined_amount": "当該月の日数-8日"
+    },
+    "plan_data": null
+  }
+}

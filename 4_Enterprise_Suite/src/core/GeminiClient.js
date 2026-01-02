@@ -138,9 +138,17 @@ class GeminiClient {
             return JSON.parse(cleanText);
         } catch (e) {
             Logger.error('Failed to parse Gemini JSON output', { text: text, error: e });
-            // リトライロジックを入れるか、あるいはnullを返してスキップするか。現状はnull
             return null;
         }
+    }
+
+    /**
+     * 利用可能なモデル一覧を取得する
+     */
+    listModels() {
+        const url = `https://generativelanguage.googleapis.com/v1beta/models?key=${this.apiKey}`;
+        const res = UrlFetchApp.fetch(url, { muteHttpExceptions: true });
+        return JSON.parse(res.getContentText());
     }
 }
 

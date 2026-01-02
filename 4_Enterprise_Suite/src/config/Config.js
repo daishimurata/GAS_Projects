@@ -25,7 +25,11 @@ const Config = {
     TABLES: {
       SALES: 'sales_transactions',
       CHAT_LOGS: 'chat_logs',
-      CALENDAR_EVENTS: 'calendar_events'
+      CALENDAR_EVENTS: 'calendar_events',
+      ATTENDANCE_MASTER: 'attendance_master',
+      ACCOUNTING_ATTENDANCE: 'accounting_attendance',
+      STAFF_ATTENDANCE: 'staff_attendance',
+      USER_MASTER: 'user_master'
     },
     QUERY_TEMPLATES: {
       MONTHLY_SALES: "SELECT * FROM `@DATASET@.@TABLE@` WHERE transaction_date >= '@START_DATE@' AND transaction_date <= '@END_DATE@' ORDER BY transaction_date ASC",
