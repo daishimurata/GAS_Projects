@@ -1,0 +1,16 @@
+{
+  "scriptId": "18VXqd6PYTxJ3gft5m9AoYyLuBUv2ZHbNCHQG5U5S9vTTrJ3gefseedoG",
+  "rootDir": "src",
+  "projectId": "ohisama-enterprise-suite",
+  "scriptExtensions": [
+    ".js",
+    ".gs"
+  ],
+  "htmlExtensions": [
+    ".html"
+  ],
+  "jsonExtensions": [
+    ".json"
+  ],
+  "filePushOrder": []
+}
