@@ -2007,15 +2007,23 @@ function estimateProductSize(url) {
         const fullHtml = response.getContentText();
 
         // Extract key metadata to stay within token limits while providing high-quality context
-        const title = (fullHtml.match(/<title>(.*?)<\/title>/i) || [])[1] || "";
-        const description = (fullHtml.match(/<meta\s+name="description"\s+content="(.*?)"/i) || [])[1] || "";
-        const jsonLd = (fullHtml.match(/<script\s+type="application\/ld\+json">([\s\S]*?)<\/script>/i) || [])[1] || "";
+        const titleMatch = fullHtml.match(/<title>(.*?)<\/title>/i) || [];
+        const rawTitle = titleMatch[1] || "";
+        const title = rawTitle.replace(/\s*-\s*メルカリ/gi, "").trim();
+
+        const description = (fullHtml.match(/<meta[^>]*name="description"[^>]*content="(.*?)"/i) || [])[1] || "";
+        const jsonLd = (fullHtml.match(/<script[^>]*type="application\/ld\+json"[^>]*>([\s\S]*?)<\/script>/i) || [])[1] || "";
 
         // Additional parameters: Extract Category, condition, price, and shipping method
-        const category = (fullHtml.match(/"categoryName":"(.*?)"/i) || [])[1] || "";
-        const condition = (fullHtml.match(/"itemConditionName":"(.*?)"/i) || [])[1] || "";
-        const price = (fullHtml.match(/"price":(\d+)/i) || [])[1] || "";
-        const shippingMethod = (fullHtml.match(/"shippingMethodName":"(.*?)"/i) || [])[1] || "";
+        const category = (fullHtml.match(/"categoryName"\s*:\s*"(.*?)"/i) || [])[1] || "";
+        const condition = (fullHtml.match(/"itemConditionName"\s*:\s*"(.*?)"/i) || [])[1] || "";
+
+        let price = (jsonLd.match(/"price"\s*:\s*(\d+)/i) || [])[1];
+        if (!price) {
+            price = (fullHtml.match(/"price"\s*:\s*(\d+)/i) || [])[1] || "";
+        }
+
+        const shippingMethod = (fullHtml.match(/"shippingMethodName"\s*:\s*"(.*?)"/i) || [])[1] || "";
 
         // Combine context with price and shipping method (crucial for set/size inference)
         const context = `Title: ${title}\nCategory: ${category}\nCondition: ${condition}\nPrice: ${price} JPY\nShippingMethod: ${shippingMethod}\nDescription: ${description}\nJSON-LD: ${jsonLd}`.substring(0, 15000);
@@ -2082,9 +2090,9 @@ ${context}`;
             if (estimated.width) estimated.width += 2;
             if (estimated.height) estimated.height += 2;
 
-            // Safety fallback if Gemini couldn't extract title/price but we have HTML metadata
-            if (!estimated.title_jp) estimated.title_jp = title || "商品名取得エラー";
-            if (!estimated.price_jpy) estimated.price_jpy = parseInt(price) || 0;
+            // Forcefully override/assign from HTML extraction to guarantee 100% accuracy
+            estimated.title_jp = title || estimated.title_jp || "商品名取得エラー";
+            estimated.price_jpy = parseInt(price) || estimated.price_jpy || 0;
 
             return estimated;
         }
