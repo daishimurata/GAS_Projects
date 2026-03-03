@@ -2071,12 +2071,20 @@ ${context}`;
         const result = JSON.parse(apiResponse.getContentText());
 
         if (result.candidates && result.candidates[0].content.parts[0].text) {
-            const estimated = JSON.parse(result.candidates[0].content.parts[0].text);
+            let text = result.candidates[0].content.parts[0].text;
+            // Clean markdown blocks
+            text = text.replace(/```json/gi, '').replace(/```/g, '').trim();
+
+            const estimated = JSON.parse(text);
 
             // Add +2cm safety margin to each dimension as requested
             if (estimated.length) estimated.length += 2;
             if (estimated.width) estimated.width += 2;
             if (estimated.height) estimated.height += 2;
+
+            // Safety fallback if Gemini couldn't extract title/price but we have HTML metadata
+            if (!estimated.title_jp) estimated.title_jp = title || "商品名取得エラー";
+            if (!estimated.price_jpy) estimated.price_jpy = parseInt(price) || 0;
 
             return estimated;
         }
