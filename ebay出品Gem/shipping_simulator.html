@@ -1,0 +1,413 @@
+<!DOCTYPE html>
+<html lang="ja">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>送料シミュレーター - eBayかわいい</title>
+    <script src="https://cdn.tailwindcss.com?plugins=forms"></script>
+    <link href="https://fonts.googleapis.com/css2?family=M+PLUS+Rounded+1c:wght@400;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined" rel="stylesheet">
+    <style>
+        :root {
+            --bg-beige: #faf7f2;
+            --text-main: #5d4a44;
+            --accent-pink: #ffb7c5;
+            --soft-pink: #fce4ec;
+            --border-color: #e0d7d5;
+        }
+
+        body {
+            font-family: 'M PLUS Rounded 1c', sans-serif;
+            background-color: var(--bg-beige);
+            color: var(--text-main);
+        }
+
+        .clean-card {
+            background: white;
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.02);
+        }
+
+        .input-pill {
+            border-radius: 9999px;
+            border: 2px solid var(--border-color);
+            padding: 0.5rem 1.5rem;
+            width: 100%;
+            transition: all 0.3s;
+        }
+
+        .input-pill:focus {
+            outline: none;
+            border-color: var(--accent-pink);
+        }
+
+        .btn-calc {
+            background-color: var(--accent-pink);
+            color: white;
+            padding: 0.75rem 2rem;
+            border-radius: 9999px;
+            font-weight: bold;
+            box-shadow: 0 4px 0 #ff8fa3;
+            transition: all 0.2s;
+        }
+
+        .btn-calc:active {
+            transform: translateY(4px);
+            box-shadow: none;
+        }
+    </style>
+</head>
+
+<body class="p-4 md:p-8">
+    <div class="max-w-4xl mx-auto">
+        <div class="mb-4">
+            <a href="<?= ScriptApp.getService().getUrl() ?>"
+                class="text-[var(--text-muted)] hover:text-[var(--accent-pink)] text-sm font-bold flex items-center gap-1 transition-colors w-fit">
+                <span class="material-symbols-outlined text-sm">arrow_back</span> トップページへ戻る
+            </a>
+        </div>
+        <header class="flex items-center gap-4 mb-8">
+            <span class="material-symbols-outlined text-4xl text-[var(--accent-pink)]">local_shipping</span>
+            <h1 class="text-2xl font-bold">会員限定 送料シミュレーター</h1>
+        </header>
+
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+            <!-- Inputs -->
+            <div class="md:col-span-1 space-y-4">
+                <div class="clean-card p-6">
+                    <div class="mb-4 pb-4 border-b border-dashed border-[var(--border-color)]">
+                        <label class="block text-sm font-bold mb-2">AI 自動取得 (商品URL)</label>
+                        <div class="flex gap-2">
+                            <input type="text" id="product-url" class="input-pill flex-1 text-xs"
+                                placeholder="メルカリ等のURLを貼り付け">
+                            <button id="btn-estimate" onclick="estimateFromUrl()"
+                                class="px-3 py-2 bg-blue-500 text-white rounded-full text-[10px] font-bold shadow-sm hover:bg-blue-600 whitespace-nowrap">自動取得</button>
+                        </div>
+                    </div>
+
+                    <div class="space-y-4 mb-4 pb-4 border-b border-dashed border-[var(--border-color)]">
+                        <div>
+                            <label class="block text-xs font-bold mb-1 text-[var(--text-muted)]">商品名</label>
+                            <input type="text" id="title-input" class="input-pill text-xs py-1.5" placeholder="商品タイトル">
+                        </div>
+                        <div class="grid grid-cols-2 gap-4">
+                            <div>
+                                <label class="block text-xs font-bold mb-1 text-gray-500">仕入価格 (円)</label>
+                                <input type="number" id="price-input" step="1" value="0" class="input-pill py-1.5"
+                                    placeholder="0">
+                            </div>
+                            <div>
+                                <label class="block text-xs font-bold mb-1 text-gray-500">実重量 (kg)</label>
+                                <input type="number" id="weight-input" step="0.1" value="0.5" class="input-pill py-1.5"
+                                    placeholder="0.5">
+                            </div>
+                        </div>
+                        <div class="grid grid-cols-3 gap-2">
+                            <div>
+                                <label class="block text-[10px] font-bold mb-1 text-gray-400">縦 (cm)</label>
+                                <input type="number" id="length-input" step="0.1" value="0"
+                                    class="input-pill text-xs py-1.5 px-2">
+                            </div>
+                            <div>
+                                <label class="block text-[10px] font-bold mb-1 text-gray-400">横 (cm)</label>
+                                <input type="number" id="width-input" step="0.1" value="0"
+                                    class="input-pill text-xs py-1.5 px-2">
+                            </div>
+                            <div>
+                                <label class="block text-[10px] font-bold mb-1 text-gray-400">高さ (cm)</label>
+                                <input type="number" id="height-input" step="0.1" value="0"
+                                    class="input-pill text-xs py-1.5 px-2">
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="space-y-3">
+                        <label class="block text-sm font-bold text-[var(--text-main)]">出品計算設定</label>
+                        <div class="grid grid-cols-2 gap-4">
+                            <div>
+                                <label class="block text-[10px] font-bold mb-1 text-gray-500">為替レート (円/USD)</label>
+                                <input type="number" id="exchange-rate" step="1" value="150"
+                                    class="input-pill text-xs py-1.5 px-2 text-center font-mono">
+                            </div>
+                            <div>
+                                <label class="block text-[10px] font-bold mb-1 text-gray-500">eBay手数料 (%)</label>
+                                <input type="number" id="ebay-fee" step="0.1" value="15"
+                                    class="input-pill text-xs py-1.5 px-2 text-center font-mono">
+                            </div>
+                            <div class="col-span-2">
+                                <label class="block text-[10px] font-bold mb-1 text-[var(--accent-pink)]">目標利益率
+                                    (%)</label>
+                                <input type="number" id="profit-margin" step="1" value="20"
+                                    class="input-pill text-xs py-1.5 px-2 border-[var(--accent-pink)] text-center font-mono font-bold">
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="mt-6 flex justify-center">
+                        <button onclick="calculate()" class="btn-calc w-full flex items-center justify-center gap-2">
+                            <span class="material-symbols-outlined text-sm">calculate</span>
+                            利益・送料を計算 ✨
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Results -->
+            <div class="md:col-span-2 space-y-6">
+                <!-- USA Results -->
+                <div class="clean-card overflow-hidden">
+                    <div
+                        class="px-6 py-4 bg-[#f8f9fa] border-b border-[var(--border-color)] flex justify-between items-center">
+                        <h2 class="font-bold text-sm text-[var(--text-main)] flex items-center gap-2">
+                            🇺🇸 アメリカ国内 (USA)
+                        </h2>
+                        <span class="text-[10px] text-gray-400">Main Market</span>
+                    </div>
+                    <table class="w-full text-left">
+                        <thead class="bg-gray-50 border-b border-[var(--border-color)]">
+                            <tr>
+                                <th class="px-6 py-3 text-[10px] font-bold uppercase text-gray-500">サービス名</th>
+                                <th class="px-4 py-3 text-[10px] font-bold uppercase text-gray-500 text-right">概算送料</th>
+                                <th class="px-4 py-3 text-[10px] font-bold uppercase text-gray-400 text-right">損益分岐点
+                                </th>
+                                <th
+                                    class="px-4 py-3 text-[10px] font-bold uppercase text-[var(--accent-pink)] text-right">
+                                    推奨販売価格</th>
+                            </tr>
+                        </thead>
+                        <tbody id="result-usa-body" class="divide-y divide-[var(--border-color)]">
+                            <tr>
+                                <td colspan="4" class="px-6 py-8 text-center text-xs text-gray-400">計算ボタンを押してください</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- Global Results -->
+                <div class="clean-card overflow-hidden">
+                    <div
+                        class="px-6 py-4 bg-[#f8f9fa] border-b border-[var(--border-color)] flex justify-between items-center">
+                        <h2 class="font-bold text-sm text-[var(--text-main)] flex items-center gap-2">
+                            🌍 その他主要国 (Global)
+                        </h2>
+                        <select id="country-global-select" onchange="calculate()"
+                            class="text-xs border-none bg-transparent font-bold cursor-pointer focus:ring-0 p-0 text-blue-600 underline">
+                            <option value="UK">イギリス (UK)</option>
+                            <option value="GERMANY">ドイツ (DE)</option>
+                            <option value="AUSTRALIA">オーストラリア (AU)</option>
+                            <option value="FRANCE">フランス (FR)</option>
+                        </select>
+                    </div>
+                    <table class="w-full text-left">
+                        <thead class="bg-gray-50 border-b border-[var(--border-color)]">
+                            <tr>
+                                <th class="px-6 py-3 text-[10px] font-bold uppercase text-gray-500">サービス名</th>
+                                <th class="px-4 py-3 text-[10px] font-bold uppercase text-gray-500 text-right">概算送料</th>
+                                <th class="px-4 py-3 text-[10px] font-bold uppercase text-gray-400 text-right">損益分岐点
+                                </th>
+                                <th
+                                    class="px-4 py-3 text-[10px] font-bold uppercase text-[var(--accent-pink)] text-right">
+                                    推奨販売価格</th>
+                            </tr>
+                        </thead>
+                        <tbody id="result-global-body" class="divide-y divide-[var(--border-color)]">
+                            <tr>
+                                <td colspan="4" class="px-6 py-8 text-center text-xs text-gray-400">計算ボタンを押してください</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <p class="text-[10px] text-gray-400 px-2 italic">
+                    ※ 料金には燃油サーチャージが含まれています。複数拠点への送料を同時確認できます。
+                </p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let rateData = null;
+
+        // Initialize rates from server
+        window.onload = function () {
+            google.script.run
+                .withSuccessHandler(data => {
+                    rateData = data;
+                    console.log("Rates loaded", data);
+                })
+                .getShippingRates();
+        };
+
+        function estimateFromUrl() {
+            const url = document.getElementById('product-url').value;
+            if (!url) {
+                alert("商品ページのURLを入力してください。");
+                return;
+            }
+
+            const btn = document.getElementById('btn-estimate');
+            btn.disabled = true;
+            btn.innerText = "推測中...";
+
+            google.script.run
+                .withSuccessHandler(result => {
+                    btn.disabled = false;
+                    btn.innerText = "自動取得";
+                    if (result) {
+                        if (result.title_jp) document.getElementById('title-input').value = result.title_jp;
+                        if (result.price_jpy) document.getElementById('price-input').value = result.price_jpy;
+
+                        document.getElementById('weight-input').value = result.weight || '';
+                        document.getElementById('length-input').value = result.length || '';
+                        document.getElementById('width-input').value = result.width || '';
+                        document.getElementById('height-input').value = result.height || '';
+                        calculate();
+                        alert("AIが商品情報とサイズを推測しました！\n数値を調整の上「利益・送料を計算」を押してください。");
+                    } else {
+                        alert("解析に失敗しました。URLを確認してください。");
+                    }
+                })
+                .withFailureHandler(err => {
+                    btn.disabled = false;
+                    btn.innerText = "自動取得";
+                    alert("エラー: " + err.message);
+                })
+                .estimateProductSize(url);
+        }
+
+        function calculate() {
+            if (!rateData) {
+                alert("データの読み込み中です。少々お待ちください。");
+                return;
+            }
+
+            const weight = parseFloat(document.getElementById('weight-input').value) || 0;
+            const length = parseFloat(document.getElementById('length-input').value) || 0;
+            const width = parseFloat(document.getElementById('width-input').value) || 0;
+            const height = parseFloat(document.getElementById('height-input').value) || 0;
+
+            const globalCountry = document.getElementById('country-global-select').value;
+
+            // Map global country to DHL Zone for better accuracy
+            const zoneMap = {
+                'UK': 'Zone_8',
+                'GERMANY': 'Zone_8',
+                'FRANCE': 'Zone_8',
+                'AUSTRALIA': 'Zone_9',
+                'CANADA': 'Zone_9'
+            };
+            const globalDhlZone = zoneMap[globalCountry] || 'Zone_8';
+
+            // Map global country to EMS Zone
+            const emsZoneMap = {
+                'UK': 'Zone_3',
+                'GERMANY': 'Zone_3',
+                'FRANCE': 'Zone_3',
+                'AUSTRALIA': 'Zone_3',
+                'CANADA': 'Zone_3'
+            };
+            const globalEmsZone = emsZoneMap[globalCountry] || 'Zone_3';
+
+            // Targets
+            renderZone('result-usa-body', 'USA_48', 'Zone_4', 'Zone_4', weight, length, width, height);
+            renderZone('result-global-body', globalCountry, globalDhlZone, globalEmsZone, weight, length, width, height);
+        }
+
+        function renderZone(targetId, ocCountry, dhlZone, emsZone, weight, length, width, height) {
+            const tbody = document.getElementById(targetId);
+            tbody.innerHTML = '';
+
+            // User Inputs for calculations
+            const itemPriceJpy = parseFloat(document.getElementById('price-input').value) || 0;
+            const exchangeRate = parseFloat(document.getElementById('exchange-rate').value) || 150;
+            const ebayFeePct = parseFloat(document.getElementById('ebay-fee').value) || 15;
+            const profitMarginPct = parseFloat(document.getElementById('profit-margin').value) || 20;
+
+            const feeRateMultiplier = 1 - (ebayFeePct / 100);
+            const targetProfitRate = 1 - (ebayFeePct / 100) - (profitMarginPct / 100);
+
+            const services = [
+                { name: 'Orange Connex Economy', key: 'orange_economy', div: 6000, country: ocCountry },
+                { name: 'SpeedPAK Economy', key: 'speedpak_economy', div: 6000, country: ocCountry },
+                { name: 'SpeedPAK DHL', key: 'speedpak_dhl', div: 5000, country: dhlZone },
+                { name: 'EMS (日本郵便)', key: 'japan_post_ems', div: null, country: emsZone },
+                { name: '国際eパケットライト', key: 'japan_post_epacket_light', div: null, country: emsZone },
+                { name: '小形包装物 (航空便)', key: 'japan_post_small_packet_air', div: null, country: emsZone },
+                { name: '国際小包 (航空便)', key: 'japan_post_parcel_air', div: null, country: emsZone },
+                { name: 'FedEx (データ未登録)', key: 'fedex', div: 5000, country: 'USA' }
+            ];
+
+            services.forEach(svc => {
+                let price = null;
+                const rates = rateData[svc.key];
+
+                // Div null means real weight only (e.g. EMS)
+                const volWeight = svc.div ? ((length * width * height) / svc.div) : 0;
+                const chargeableWeight = Math.max(weight, volWeight);
+
+                if (rates) {
+                    if (svc.key === 'speedpak_dhl') {
+                        // DHL rates are structured as { "weight": { "Zone_X": price } }
+                        const sortedWeightKeys = Object.keys(rates).sort((a, b) => Number(a) - Number(b));
+                        const targetStrKey = sortedWeightKeys.find(k => Number(k) >= (chargeableWeight - 0.001));
+                        if (targetStrKey && rates[targetStrKey] && rates[targetStrKey][svc.country]) {
+                            price = rates[targetStrKey][svc.country];
+                        }
+                    } else {
+                        // Economy rates are structured as { "Country": { "weight": price } }
+                        if (rates[svc.country]) {
+                            const countryRates = rates[svc.country];
+                            const sortedWeightKeys = Object.keys(countryRates).sort((a, b) => Number(a) - Number(b));
+                            const targetStrKey = sortedWeightKeys.find(k => Number(k) >= (chargeableWeight - 0.001));
+                            if (targetStrKey) {
+                                price = countryRates[targetStrKey];
+                            }
+                        }
+                    }
+                }
+
+                // Calculator Logic
+                let breakEvenUsd = '-';
+                let recommendedUsd = '-';
+
+                if (price) {
+                    const totalCostJpy = itemPriceJpy + price; // 仕入価格 + 送料(円)
+                    const totalCostUsd = totalCostJpy / exchangeRate;
+
+                    // 損益分岐点: totalCostUsd / (1 - ebayFee)
+                    const breakEvenPrice = totalCostUsd / feeRateMultiplier;
+                    breakEvenUsd = `$${breakEvenPrice.toFixed(2)}`;
+
+                    // 推奨販売価格: totalCostUsd / (1 - ebayFee - profitMargin)
+                    if (targetProfitRate > 0) {
+                        const recommendedPrice = totalCostUsd / targetProfitRate;
+                        recommendedUsd = `<span class="font-black text-lg">$${recommendedPrice.toFixed(2)}</span>`;
+                    } else {
+                        recommendedUsd = '<span class="text-[9px] text-red-500 leading-tight">利益率設定が<br>高すぎます</span>';
+                    }
+                }
+
+                const priceDisplay = price ? `¥${price.toLocaleString()}` : '<span class="text-xs text-gray-400">該当なし</span>';
+                const isVolumetric = volWeight > weight;
+                const volumetricHtml = isVolumetric ? '<br><span class="text-[9px] text-orange-500 font-normal">容積適用 (' + volWeight.toFixed(2) + 'kg)</span>' : '';
+
+                const tr = document.createElement('tr');
+                tr.className = "hover:bg-gray-50 transition-colors";
+                tr.innerHTML = `
+                    <td class="px-6 py-4 font-bold text-[13px] text-[var(--text-main)]">
+                        ${svc.name}
+                        ${volumetricHtml}
+                    </td>
+                    <td class="px-4 py-4 text-right font-bold text-sm text-[var(--text-muted)]">${priceDisplay}</td>
+                    <td class="px-4 py-4 text-right font-bold text-sm text-gray-400">${breakEvenUsd}</td>
+                    <td class="px-4 py-4 text-right text-[var(--accent-pink)]">${recommendedUsd}</td>
+                `;
+                tbody.appendChild(tr);
+            });
+        }
+    </script>
+</body>
+
+</html>
